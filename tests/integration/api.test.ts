@@ -16,6 +16,8 @@
  * ============================================================================
  */
 
+import { describe, expect, it } from "@jest/globals";
+
 const BASE_URL = process.env.TEST_BASE_URL ?? "http://localhost:3000";
 
 // Utility: wrapper na fetch z JSON body
