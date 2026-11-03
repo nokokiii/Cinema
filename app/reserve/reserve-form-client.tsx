@@ -112,16 +112,26 @@ export default function ReserveFormClient({
     setErrorMessage(null);
 
     try {
-      const res = await fetch(`/api/reservations/${reservation.reservationId}/purchase`, {
+      const res = await fetch("/api/stripe/checkout-session", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reservationId: reservation.reservationId }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
+        if (res.status === 409 && data.code) {
+          startTransition(() => {
+            router.push(`/reservations/${encodeURIComponent(data.code)}`);
+          });
+          return;
+        }
         if (res.status === 410) {
           setIsExpired(true);
           setErrorMessage("Rezerwacja wygasła, fotel wrócił do puli");
+        } else if (res.status === 503) {
+          setErrorMessage("Płatności Stripe nie są jeszcze skonfigurowane.");
         } else {
           setErrorMessage(data.error || "Wystąpił błąd podczas zakupu.");
         }
@@ -129,10 +139,13 @@ export default function ReserveFormClient({
         return;
       }
 
-      // Navigate to confirmation page
-      startTransition(() => {
-        router.push(`/reservations/${encodeURIComponent(data.code || reservation.code)}`);
-      });
+      if (!data.checkoutUrl) {
+        setErrorMessage("Nie udało się uruchomić płatności Stripe.");
+        setIsLoading(false);
+        return;
+      }
+
+      window.location.assign(data.checkoutUrl);
     } catch (err) {
       console.error(err);
       setErrorMessage("Błąd podczas finalizacji zakupu. Spróbuj ponownie.");
@@ -194,7 +207,8 @@ export default function ReserveFormClient({
             Rezerwacja wygasła, fotel wrócił do puli
           </h2>
           <p className="text-slate-400 text-sm mb-6">
-            Upłynął czas na sfinalizowanie zakupu. Miejsce stało się ponownie dostępne dla innych widzów.
+            Upłynął czas na sfinalizowanie zakupu. Miejsce stało się ponownie
+            dostępne dla innych widzów.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <Link
@@ -219,10 +233,14 @@ export default function ReserveFormClient({
               Czas na dokończenie zakupu
             </div>
             <div className="text-3xl font-extrabold text-amber-400 font-mono">
-              Trzymamy Twój fotel jeszcze {secondsRemaining !== null ? formatTime(secondsRemaining) : "--:--"}
+              Trzymamy Twój fotel jeszcze{" "}
+              {secondsRemaining !== null
+                ? formatTime(secondsRemaining)
+                : "--:--"}
             </div>
             <p className="text-xs text-slate-400 mt-2">
-              Po upływie tego czasu rezerwacja przepadnie, a miejsce wróci do ogólnej puli.
+              Po upływie tego czasu rezerwacja przepadnie, a miejsce wróci do
+              ogólnej puli.
             </p>
           </div>
 
@@ -237,7 +255,9 @@ export default function ReserveFormClient({
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">Kod rezerwacji:</span>
-              <span className="font-mono text-amber-400">{reservation.code}</span>
+              <span className="font-mono text-amber-400">
+                {reservation.code}
+              </span>
             </div>
           </div>
 
@@ -247,14 +267,19 @@ export default function ReserveFormClient({
             disabled={isLoading || isExpired}
             className="w-full py-3.5 px-6 rounded-xl font-bold text-lg bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 transition-all shadow-xl shadow-amber-500/20 active:scale-[0.98] cursor-pointer"
           >
-            {isLoading ? "Przetwarzanie..." : "Kupuję bilet"}
+            {isLoading
+              ? "Przekierowanie do Stripe..."
+              : "Przejdź do płatności Stripe"}
           </button>
         </div>
       ) : (
         /* State 1: FORM to create reservation */
         <form onSubmit={handleReserve} className="space-y-4">
           <div>
-            <label htmlFor="customerName" className="block text-sm font-medium text-slate-300 mb-1">
+            <label
+              htmlFor="customerName"
+              className="block text-sm font-medium text-slate-300 mb-1"
+            >
               Imię i nazwisko
             </label>
             <input
@@ -269,7 +294,10 @@ export default function ReserveFormClient({
           </div>
 
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-slate-300 mb-1">
+            <label
+              htmlFor="email"
+              className="block text-sm font-medium text-slate-300 mb-1"
+            >
               Adres e-mail
             </label>
             <input
@@ -284,7 +312,8 @@ export default function ReserveFormClient({
           </div>
 
           <p className="text-xs text-slate-400">
-            Po kliknięciu przycisku miejsce zostanie zarezerwowane na 15 minut. W tym czasie nikt inny nie będzie mógł go wybrać.
+            Po kliknięciu przycisku miejsce zostanie zarezerwowane na 15 minut.
+            W tym czasie nikt inny nie będzie mógł go wybrać.
           </p>
 
           <button
