@@ -1,8 +1,14 @@
 // Cinema booking service supporting MongoDB with resilient in-memory fallback
 import { randomBytes, randomUUID } from "crypto";
+import type { Db } from "mongodb";
 import { getDb } from "./mongodb";
 import { MAX_SEATS_PER_RESERVATION } from "./seats";
-import { CreateReservationResponse, EventDocument, ReservationDocument } from "./types";
+import {
+  CreateReservationResponse,
+  EventDocument,
+  ReservationDocument,
+  SeatLockDocument,
+} from "./types";
 
 /**
  * Generates an 8x10 cinema seat layout (Rows A to H, Seats 1 to 10).
@@ -199,44 +205,177 @@ export async function createReservation({
     throw new Error("SEAT_INVALID");
   }
 
+  const db = await getDb();
+
   const now = new Date();
-  const timeoutMinutes = getReservationTimeoutMinutes();
-  const expiresAt = new Date(now.getTime() + timeoutMinutes * 60 * 1000);
-
-  // Check if seat is currently taken
-  const takenSeats = await getTakenSeats(eventId);
-  if (requestedSeats.some((seat) => takenSeats.includes(seat))) {
-    throw new Error("SEAT_ALREADY_TAKEN");
-  }
-
-  const reservationId = randomUUID();
-  const code = generateTicketCode(requestedSeats[0]);
-
-  const newReservation: ReservationDocument = {
-    _id: reservationId,
+  const expiresAt = new Date(now.getTime() + getReservationTimeoutMinutes() * 60 * 1000);
+  const candidate: ReservationDocument = {
+    _id: randomUUID(),
     eventId,
     seatIds: requestedSeats,
     customerName: customerName.trim(),
     email: email.trim().toLowerCase(),
-    code,
+    code: generateTicketCode(requestedSeats[0]),
     status: "RESERVED",
     createdAt: now,
     expiresAt,
   };
 
-  const db = await getDb();
   if (db) {
-    await db.collection<ReservationDocument>("reservations").insertOne(newReservation);
-  } else {
-    getMemoryStore().reservations.push(newReservation);
+    await ensureIndexes(db);
+    return createReservationInMongo(db, candidate);
+  }
+  return createReservationInMemory(candidate);
+}
+
+function toReservationResponse(reservation: ReservationDocument): CreateReservationResponse {
+  return {
+    reservationId: reservation._id,
+    expiresAt: new Date(reservation.expiresAt).toISOString(),
+    code: reservation.code,
+    seatIds: reservation.seatIds,
+  };
+}
+
+function sameSeats(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((seat) => b.includes(seat));
+}
+
+function isHoldingSeats(reservation: ReservationDocument, now: Date): boolean {
+  if (reservation.status === "PURCHASED") return true;
+  return reservation.status === "RESERVED" && new Date(reservation.expiresAt) > now;
+}
+
+/**
+ * Check-and-insert runs without awaiting, so concurrent requests cannot interleave.
+ * An identical request (same email and seats) returns the existing reservation.
+ */
+function createReservationInMemory(candidate: ReservationDocument): CreateReservationResponse {
+  const store = getMemoryStore();
+  const now = new Date();
+  const holding = store.reservations.filter(
+    (r) => r.eventId === candidate.eventId && isHoldingSeats(r, now)
+  );
+
+  const duplicate = holding.find(
+    (r) =>
+      r.status === "RESERVED" &&
+      r.email === candidate.email &&
+      sameSeats(r.seatIds, candidate.seatIds)
+  );
+  if (duplicate) return toReservationResponse(duplicate);
+
+  if (holding.some((r) => r.seatIds.some((seat) => candidate.seatIds.includes(seat)))) {
+    throw new Error("SEAT_ALREADY_TAKEN");
   }
 
-  return {
-    reservationId,
-    expiresAt: expiresAt.toISOString(),
-    code,
-    seatIds: requestedSeats,
-  };
+  store.reservations.push(candidate);
+  return toReservationResponse(candidate);
+}
+
+// Expired locks are only taken over after this grace period so a purchase racing the expiry can finish
+const SEAT_LOCK_TAKEOVER_GRACE_MS = 5000;
+
+function isDuplicateKeyError(error: unknown): boolean {
+  return (error as { code?: number } | null)?.code === 11000;
+}
+
+/**
+ * Acquires one lock document per seat (in sorted order) via conditional upsert; a held,
+ * unexpired lock makes the upsert collide on _id, which MongoDB rejects atomically.
+ */
+async function createReservationInMongo(
+  db: Db,
+  candidate: ReservationDocument
+): Promise<CreateReservationResponse> {
+  const locks = db.collection<SeatLockDocument>("seatLocks");
+  const reservations = db.collection<ReservationDocument>("reservations");
+  const now = new Date();
+  const takeoverBefore = new Date(now.getTime() - SEAT_LOCK_TAKEOVER_GRACE_MS);
+  const acquired: string[] = [];
+
+  try {
+    for (const seatId of candidate.seatIds) {
+      const lockId = `${candidate.eventId}:${seatId}`;
+      try {
+        await locks.findOneAndUpdate(
+          { _id: lockId, status: "RESERVED", expiresAt: { $lte: takeoverBefore } },
+          {
+            $set: {
+              eventId: candidate.eventId,
+              seatId,
+              reservationId: candidate._id,
+              email: candidate.email,
+              seatIds: candidate.seatIds,
+              code: candidate.code,
+              status: "RESERVED",
+              expiresAt: new Date(candidate.expiresAt),
+            },
+          },
+          { upsert: true }
+        );
+        acquired.push(lockId);
+      } catch (error) {
+        if (!isDuplicateKeyError(error)) throw error;
+
+        if (acquired.length === 0) {
+          const holder = await locks.findOne({ _id: lockId });
+          if (
+            holder &&
+            holder.status === "RESERVED" &&
+            holder.expiresAt > now &&
+            holder.email === candidate.email &&
+            sameSeats(holder.seatIds, candidate.seatIds)
+          ) {
+            return {
+              reservationId: holder.reservationId,
+              expiresAt: holder.expiresAt.toISOString(),
+              code: holder.code,
+              seatIds: holder.seatIds,
+            };
+          }
+        }
+        throw new Error("SEAT_ALREADY_TAKEN");
+      }
+    }
+
+    // Guards against reservations that were stored before seat locks existed
+    const conflicting = await reservations.findOne({
+      _id: { $ne: candidate._id },
+      eventId: candidate.eventId,
+      seatIds: { $in: candidate.seatIds },
+      $or: [{ status: "PURCHASED" }, { status: "RESERVED", expiresAt: { $gt: now } }],
+    });
+    if (conflicting) throw new Error("SEAT_ALREADY_TAKEN");
+
+    await reservations.insertOne(candidate);
+    return toReservationResponse(candidate);
+  } catch (error) {
+    if (acquired.length > 0) {
+      await locks.deleteMany({ _id: { $in: acquired }, reservationId: candidate._id });
+    }
+    throw error;
+  }
+}
+
+declare global {
+  var _cinemaIndexesPromise: Promise<void> | undefined;
+}
+
+function ensureIndexes(db: Db): Promise<void> {
+  if (!global._cinemaIndexesPromise) {
+    const reservations = db.collection<ReservationDocument>("reservations");
+    global._cinemaIndexesPromise = Promise.all([
+      reservations.createIndex({ eventId: 1, status: 1, expiresAt: 1 }),
+      reservations.createIndex({ code: 1 }),
+    ])
+      .then(() => undefined)
+      .catch((error) => {
+        global._cinemaIndexesPromise = undefined;
+        console.warn("[MongoDB] Failed to create indexes:", error);
+      });
+  }
+  return global._cinemaIndexesPromise;
 }
 
 /**

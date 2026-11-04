@@ -98,50 +98,21 @@ describe("ZAGROŻENIE 1: Double Booking", () => {
   // Wariant A – Równoległe żądania (symulacja Promise.all)
   // -------------------------------------------------------------------------
   it("[1-A] Równoległe rezerwacje tego samego fotela: dokładnie jedna wygrywa", async () => {
+    // Różni klienci (różne e-maile) – identyczne żądania tego samego klienta są idempotentne
     const results = await Promise.allSettled([
-      makeReservation({ seatId: "B5" }),
-      makeReservation({ seatId: "B5" }),
-      makeReservation({ seatId: "B5" }),
+      makeReservation({ seatId: "B5", email: "a@example.com" }),
+      makeReservation({ seatId: "B5", email: "b@example.com" }),
+      makeReservation({ seatId: "B5", email: "c@example.com" }),
     ]);
 
     const fulfilled = results.filter((r) => r.status === "fulfilled");
     const rejected = results.filter((r) => r.status === "rejected");
 
-    /**
-     * UWAGA TESTOWA (Race Condition Detection):
-     * In-memory store NIE ma mechanizmu transakcji / mutex.
-     * Przy Promise.all trzy getTakenSeats() biegną równolegle zanim
-     * jakikolwiek insert zakończy się – wszystkie widzą pusty store.
-     *
-     * W produkcji (MongoDB) atomowość zapewnia uniqueIndex na {eventId, seatId}.
-     * Ten test DOKUMENTUJE brak ochrony współbieżności w warstwie in-memory
-     * i powinien być traktowany jako czerwona flaga (znany dług techniczny).
-     *
-     * Oczekiwanie na in-memory: wszystkie 3 przechodzą (race condition).
-     * Oczekiwanie na MongoDB z unique index: 1 wygrywa, 2 odrzucone.
-     */
-    if (fulfilled.length === 1) {
-      // Idealny scenariusz (MongoDB z indeksem lub w przyszłości mutex)
-      expect(fulfilled).toHaveLength(1);
-      expect(rejected).toHaveLength(2);
-      rejected.forEach((r) => {
-        expect((r as PromiseRejectedResult).reason.message).toBe("SEAT_ALREADY_TAKEN");
-      });
-    } else {
-      // Wykryty race condition w in-memory store – logujemy jako znany problem
-      console.warn(
-        `[1-A] RACE CONDITION WYKRYTY: ${fulfilled.length}/3 rezerwacji przeszło równolegle. ` +
-          "In-memory store nie ma mutex/transakcji. Docelowo MongoDB powinien to zablokować."
-      );
-      // Przynajmniej jedna musi przejść
-      expect(fulfilled.length).toBeGreaterThanOrEqual(1);
-      // W żadnym wypadku nie może wyrzucić błędu krytycznego 500
-      results.forEach((r) => {
-        if (r.status === "rejected") {
-          expect((r as PromiseRejectedResult).reason.message).toBe("SEAT_ALREADY_TAKEN");
-        }
-      });
-    }
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(2);
+    rejected.forEach((r) => {
+      expect((r as PromiseRejectedResult).reason.message).toBe("SEAT_ALREADY_TAKEN");
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -151,9 +122,9 @@ describe("ZAGROŻENIE 1: Double Booking", () => {
     const seatId = "B6";
 
     // Sekwencyjnie – pewny wynik bez race condition
-    const r1 = await makeReservation({ seatId }).catch((e: Error) => e);
-    const r2 = await makeReservation({ seatId }).catch((e: Error) => e);
-    const r3 = await makeReservation({ seatId }).catch((e: Error) => e);
+    const r1 = await makeReservation({ seatId, email: "a@example.com" }).catch((e: Error) => e);
+    const r2 = await makeReservation({ seatId, email: "b@example.com" }).catch((e: Error) => e);
+    const r3 = await makeReservation({ seatId, email: "c@example.com" }).catch((e: Error) => e);
 
     const successes = [r1, r2, r3].filter((r) => !(r instanceof Error));
     const failures = [r1, r2, r3].filter((r) => r instanceof Error);
@@ -732,5 +703,61 @@ describe("Rezerwacja wielu miejsc", () => {
 
     const taken = await getTakenSeats(VALID_EVENT_ID);
     expect(taken).toEqual(expect.arrayContaining(["F1", "F2"]));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. Idempotentność tworzenia rezerwacji
+// ---------------------------------------------------------------------------
+
+describe("Idempotentność tworzenia rezerwacji", () => {
+  beforeEach(resetStore);
+
+  it("Dwa równoległe identyczne żądania zwracają tę samą rezerwację bez duplikatu", async () => {
+    const [r1, r2] = await Promise.all([
+      makeReservation({ seatId: "G1" }),
+      makeReservation({ seatId: "G1" }),
+    ]);
+
+    expect(r2.reservationId).toBe(r1.reservationId);
+    expect(r2.code).toBe(r1.code);
+    expect(global._inMemoryStore!.reservations).toHaveLength(1);
+  });
+
+  it("Ponowione identyczne żądanie (sekwencyjnie) zwraca istniejącą rezerwację", async () => {
+    const first = await makeReservation({ seatId: "G2" });
+    const retry = await makeReservation({ seatId: "G2" });
+
+    expect(retry).toEqual(first);
+    expect(global._inMemoryStore!.reservations).toHaveLength(1);
+  });
+
+  it("Inny zestaw miejsc tego samego klienta nie jest traktowany jako duplikat", async () => {
+    await makeReservation({ seatId: "G3" });
+
+    await expect(
+      createReservation({
+        eventId: VALID_EVENT_ID,
+        seatIds: ["G3", "G4"],
+        customerName: "Jan Kowalski",
+        email: "jan@example.com",
+      })
+    ).rejects.toThrow("SEAT_ALREADY_TAKEN");
+  });
+
+  it("Po wygaśnięciu identyczne żądanie tworzy nową rezerwację", async () => {
+    const first = await makeReservation({ seatId: "G5" });
+    const res = global._inMemoryStore!.reservations.find((r) => r._id === first.reservationId)!;
+    res.expiresAt = new Date(Date.now() - 1000);
+
+    const second = await makeReservation({ seatId: "G5" });
+    expect(second.reservationId).not.toBe(first.reservationId);
+  });
+
+  it("Kupiona rezerwacja nie jest zwracana ponownie – fotel zajęty", async () => {
+    const { reservationId } = await makeReservation({ seatId: "G6" });
+    await purchaseReservation(reservationId);
+
+    await expect(makeReservation({ seatId: "G6" })).rejects.toThrow("SEAT_ALREADY_TAKEN");
   });
 });

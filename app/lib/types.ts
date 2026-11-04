@@ -26,6 +26,19 @@ export interface ReservationDocument {
   purchasedAt?: string | Date;
 }
 
+// One document per (event, seat); its unique _id makes seat acquisition atomic in MongoDB
+export interface SeatLockDocument {
+  _id: string;
+  eventId: string;
+  seatId: string;
+  reservationId: string;
+  email: string;
+  seatIds: string[];
+  code: string;
+  status: Exclude<ReservationStatus, "EXPIRED">;
+  expiresAt: Date;
+}
+
 export interface EventDetailResponse {
   event: EventDocument;
   takenSeats: string[];

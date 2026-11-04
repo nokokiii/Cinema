@@ -61,12 +61,12 @@ function nextSeat(): string {
   return `${rows[rowIndex]}${colIndex}`;
 }
 
-async function reserveSeat(seatId?: string) {
+async function reserveSeat(seatId?: string, email = "tester@cinema.test") {
   return api("POST", "/api/reservations", {
     eventId: VALID_EVENT_ID,
     seatId: seatId ?? nextSeat(),
     customerName: "Tester API",
-    email: "tester@cinema.test",
+    email,
   });
 }
 
@@ -82,9 +82,9 @@ describe("API: ZAGROŻENIE 1 – Double Booking", () => {
     const seat = nextSeat();
 
     const [r1, r2, r3] = await Promise.all([
-      reserveSeat(seat),
-      reserveSeat(seat),
-      reserveSeat(seat),
+      reserveSeat(seat, "client-1@cinema.test"),
+      reserveSeat(seat, "client-2@cinema.test"),
+      reserveSeat(seat, "client-3@cinema.test"),
     ]);
 
     const responses = [r1, r2, r3];
@@ -104,11 +104,27 @@ describe("API: ZAGROŻENIE 1 – Double Booking", () => {
   // -------------------------------------------------------------------------
   it("[1-A-boundary] Dwa równoległe żądania: wynik 1+1, nie 2+0", async () => {
     const seat = nextSeat();
-    const [r1, r2] = await Promise.all([reserveSeat(seat), reserveSeat(seat)]);
+    const [r1, r2] = await Promise.all([
+      reserveSeat(seat, "first@cinema.test"),
+      reserveSeat(seat, "second@cinema.test"),
+    ]);
 
     const statuses = [r1.status, r2.status].sort();
     // Jeden 201, jeden 409
     expect(statuses).toEqual([201, 409]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Idempotentność: dwa identyczne równoległe żądania tego samego klienta
+  // -------------------------------------------------------------------------
+  it("[1-A-idempotent] Identyczne równoległe żądania: oba 201 z tą samą rezerwacją", async () => {
+    const seat = nextSeat();
+    const [r1, r2] = await Promise.all([reserveSeat(seat), reserveSeat(seat)]);
+
+    expect(r1.status).toBe(201);
+    expect(r2.status).toBe(201);
+    expect(r2.body.reservationId).toEqual(r1.body.reservationId);
+    expect(r2.body.code).toEqual(r1.body.code);
   });
 
   // -------------------------------------------------------------------------
@@ -118,11 +134,11 @@ describe("API: ZAGROŻENIE 1 – Double Booking", () => {
     const seat = nextSeat();
 
     // Użytkownik A rezerwuje
-    const first = await reserveSeat(seat);
+    const first = await reserveSeat(seat, "user-a@cinema.test");
     expect(first.status).toBe(201);
 
     // Użytkownik B – ten sam fotel
-    const second = await reserveSeat(seat);
+    const second = await reserveSeat(seat, "user-b@cinema.test");
     expect(second.status).toBe(409);
     expect(second.body).toHaveProperty("error");
     expect(String(second.body.error)).toMatch(/reserved|taken/i);
@@ -465,7 +481,7 @@ describe("API: ZAGROŻENIE 5 – Spam & Resource Exhaustion", () => {
     const seat = nextSeat();
 
     const results = await Promise.all(
-      Array.from({ length: 5 }, () => reserveSeat(seat))
+      Array.from({ length: 5 }, (_, i) => reserveSeat(seat, `spam-${i}@cinema.test`))
     );
 
     const successes = results.filter((r) => r.status === 201);
