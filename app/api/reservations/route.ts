@@ -1,4 +1,4 @@
-// POST /api/reservations - Reserves a seat for 15 minutes (or 2 minutes in testing)
+// POST /api/reservations - Reserves one or more seats for 15 minutes (or 2 minutes in testing)
 import { NextResponse } from "next/server";
 import { createReservation } from "@/app/lib/events-service";
 import { enforceRateLimit } from "@/app/lib/rate-limit";
@@ -9,19 +9,24 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { eventId, seatId, customerName, email } = body;
+    const { eventId, seatId, seatIds, customerName, email } = body;
+    const seats: string[] = Array.isArray(seatIds)
+      ? seatIds.map(String)
+      : seatId
+        ? [String(seatId)]
+        : [];
 
     // Validate required fields
-    if (!eventId || !seatId || !customerName || !email) {
+    if (!eventId || seats.length === 0 || !customerName || !email) {
       return NextResponse.json(
-        { error: "Missing required fields: eventId, seatId, customerName, email" },
+        { error: "Missing required fields: eventId, seatId (or seatIds), customerName, email" },
         { status: 400 }
       );
     }
 
     const result = await createReservation({
       eventId: String(eventId),
-      seatId: String(seatId),
+      seatIds: seats,
       customerName: String(customerName),
       email: String(email),
     });
@@ -33,7 +38,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Event not found" }, { status: 404 });
       }
       if (error.message === "SEAT_INVALID") {
-        return NextResponse.json({ error: "Invalid seat for this screening" }, { status: 400 });
+        return NextResponse.json({ error: "Invalid seats for this screening" }, { status: 400 });
       }
       if (error.message === "SEAT_ALREADY_TAKEN") {
         return NextResponse.json(

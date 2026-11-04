@@ -16,7 +16,7 @@ export interface EventDocument {
 export interface ReservationDocument {
   _id: string;
   eventId: string;
-  seatId: string;
+  seatIds: string[];
   customerName: string;
   email: string;
   code: string;
@@ -33,7 +33,7 @@ export interface EventDetailResponse {
 
 export interface CreateReservationRequest {
   eventId: string;
-  seatId: string;
+  seatIds: string[];
   customerName: string;
   email: string;
 }
@@ -42,6 +42,7 @@ export interface CreateReservationResponse {
   reservationId: string;
   expiresAt: string;
   code: string;
+  seatIds: string[];
 }
 
 export interface PurchaseResponse {

@@ -31,9 +31,7 @@ async function TicketContent({ code }: { code: string }) {
 
   const { reservation, event, isExpired } = details;
 
-  // Format seat representation
-  const row = reservation.seatId.charAt(0);
-  const seatNumber = reservation.seatId.slice(1);
+  const seatList = reservation.seatIds.join(", ");
 
   const screeningDate = event ? new Date(event.startsAt) : null;
   const formattedDate = screeningDate
@@ -59,7 +57,7 @@ async function TicketContent({ code }: { code: string }) {
           Rezerwacja wygasła, fotel wrócił do puli
         </h1>
         <p className="text-slate-400 text-sm mb-6">
-          Czas ważności rezerwacji fotela {reservation.seatId} minął przed opłaceniem.
+          Czas ważności rezerwacji ({seatList}) minął przed opłaceniem.
         </p>
         <Link
           href="/"
@@ -118,15 +116,13 @@ async function TicketContent({ code }: { code: string }) {
             <div className="text-xs text-slate-400 mb-1">Godzina</div>
             <div className="text-sm font-semibold text-white">{formattedTime}</div>
           </div>
-          <div>
-            <div className="text-xs text-slate-400 mb-1">Rząd i miejsce</div>
-            <div className="text-base font-bold text-amber-400">
-              Rząd {row}, miejsce {seatNumber}
+          <div className="col-span-2">
+            <div className="text-xs text-slate-400 mb-1">
+              {reservation.seatIds.length > 1
+                ? `Miejsca (${reservation.seatIds.length})`
+                : "Miejsce"}
             </div>
-          </div>
-          <div>
-            <div className="text-xs text-slate-400 mb-1">Identyfikator fotela</div>
-            <div className="text-base font-bold text-white font-mono">{reservation.seatId}</div>
+            <div className="text-base font-bold text-amber-400 font-mono">{seatList}</div>
           </div>
         </div>
 

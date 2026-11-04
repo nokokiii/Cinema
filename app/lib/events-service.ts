@@ -1,7 +1,8 @@
 // Cinema booking service supporting MongoDB with resilient in-memory fallback
 import { randomBytes, randomUUID } from "crypto";
 import { getDb } from "./mongodb";
-import { EventDocument, ReservationDocument } from "./types";
+import { MAX_SEATS_PER_RESERVATION } from "./seats";
+import { CreateReservationResponse, EventDocument, ReservationDocument } from "./types";
 
 /**
  * Generates an 8x10 cinema seat layout (Rows A to H, Seats 1 to 10).
@@ -152,7 +153,7 @@ export async function getTakenSeats(eventId: string): Promise<string[]> {
       ],
     }).toArray();
 
-    return activeReservations.map((res) => res.seatId);
+    return activeReservations.flatMap((res) => res.seatIds);
   }
 
   // In-memory fallback
@@ -167,30 +168,34 @@ export async function getTakenSeats(eventId: string): Promise<string[]> {
     return false;
   });
 
-  return activeReservations.map((res) => res.seatId);
+  return activeReservations.flatMap((res) => res.seatIds);
 }
 
 /**
- * Creates a new reservation for a seat if it is free.
+ * Creates a single reservation holding all requested seats if every one of them is free.
  */
 export async function createReservation({
   eventId,
-  seatId,
+  seatIds,
   customerName,
   email,
 }: {
   eventId: string;
-  seatId: string;
+  seatIds: string[];
   customerName: string;
   email: string;
-}): Promise<{ reservationId: string; expiresAt: string; code: string }> {
+}): Promise<CreateReservationResponse> {
   const event = await getEventById(eventId);
   if (!event) {
     throw new Error("EVENT_NOT_FOUND");
   }
 
-  // Validate seat exists in the event's seating plan
-  if (!event.seats.includes(seatId)) {
+  const requestedSeats = [...new Set(seatIds)].sort();
+  if (
+    requestedSeats.length === 0 ||
+    requestedSeats.length > MAX_SEATS_PER_RESERVATION ||
+    !requestedSeats.every((seat) => event.seats.includes(seat))
+  ) {
     throw new Error("SEAT_INVALID");
   }
 
@@ -200,17 +205,17 @@ export async function createReservation({
 
   // Check if seat is currently taken
   const takenSeats = await getTakenSeats(eventId);
-  if (takenSeats.includes(seatId)) {
+  if (requestedSeats.some((seat) => takenSeats.includes(seat))) {
     throw new Error("SEAT_ALREADY_TAKEN");
   }
 
   const reservationId = randomUUID();
-  const code = generateTicketCode(seatId);
+  const code = generateTicketCode(requestedSeats[0]);
 
   const newReservation: ReservationDocument = {
     _id: reservationId,
     eventId,
-    seatId,
+    seatIds: requestedSeats,
     customerName: customerName.trim(),
     email: email.trim().toLowerCase(),
     code,
@@ -230,6 +235,7 @@ export async function createReservation({
     reservationId,
     expiresAt: expiresAt.toISOString(),
     code,
+    seatIds: requestedSeats,
   };
 }
 

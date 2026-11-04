@@ -8,12 +8,12 @@ import { EventDocument } from "@/app/lib/types";
 
 interface ReserveFormClientProps {
   event: EventDocument;
-  seatId: string;
+  seatIds: string[];
 }
 
 export default function ReserveFormClient({
   event,
-  seatId,
+  seatIds,
 }: ReserveFormClientProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -34,9 +34,7 @@ export default function ReserveFormClient({
   const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
   const [isExpired, setIsExpired] = useState(false);
 
-  // Format seat label: e.g. "F7" -> "Rząd F, miejsce 7"
-  const row = seatId.charAt(0);
-  const seatNumber = seatId.slice(1);
+  const isMultiSeat = seatIds.length > 1;
 
   // Live countdown timer effect
   useEffect(() => {
@@ -77,7 +75,7 @@ export default function ReserveFormClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           eventId: event._id,
-          seatId,
+          seatIds,
           customerName: customerName.trim(),
           email: email.trim(),
         }),
@@ -185,9 +183,11 @@ export default function ReserveFormClient({
         </div>
         <h1 className="text-2xl font-bold text-white mb-2">{event.title}</h1>
         <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
-          <span className="text-sm text-slate-400">Wybrane miejsce:</span>
-          <span className="text-base font-bold text-amber-400">
-            Rząd {row}, miejsce {seatNumber} ({seatId})
+          <span className="text-sm text-slate-400">
+            {isMultiSeat ? `Wybrane miejsca (${seatIds.length}):` : "Wybrane miejsce:"}
+          </span>
+          <span className="text-base font-bold text-amber-400 font-mono">
+            {seatIds.join(", ")}
           </span>
         </div>
       </div>
@@ -312,8 +312,8 @@ export default function ReserveFormClient({
           </div>
 
           <p className="text-xs text-slate-400">
-            Po kliknięciu przycisku miejsce zostanie zarezerwowane na 15 minut.
-            W tym czasie nikt inny nie będzie mógł go wybrać.
+            Po kliknięciu przycisku {isMultiSeat ? "miejsca zostaną zarezerwowane" : "miejsce zostanie zarezerwowane"} na
+            15 minut. W tym czasie nikt inny nie będzie mógł {isMultiSeat ? "ich" : "go"} wybrać.
           </p>
 
           <button
@@ -321,7 +321,11 @@ export default function ReserveFormClient({
             disabled={isLoading}
             className="w-full py-3.5 px-6 rounded-xl font-bold text-base bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 transition-all shadow-lg shadow-amber-500/20 active:scale-[0.98] cursor-pointer mt-2"
           >
-            {isLoading ? "Rezerwowanie miejsca..." : "Rezerwuj fotel"}
+            {isLoading
+              ? "Rezerwowanie..."
+              : isMultiSeat
+                ? `Rezerwuj fotele (${seatIds.length})`
+                : "Rezerwuj fotel"}
           </button>
         </form>
       )}

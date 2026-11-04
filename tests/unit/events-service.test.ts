@@ -41,12 +41,13 @@ async function makeReservation(
     email: string;
   }> = {}
 ) {
+  const { seatId = VALID_SEAT, ...rest } = overrides;
   return createReservation({
     eventId: VALID_EVENT_ID,
-    seatId: VALID_SEAT,
     customerName: "Jan Kowalski",
     email: "jan@example.com",
-    ...overrides,
+    ...rest,
+    seatIds: [seatId],
   });
 }
 
@@ -365,7 +366,7 @@ describe("ZAGROŻENIE 3: API Abuse – walidacja wejścia (service layer)", () =
     await expect(
       createReservation({
         eventId: "",
-        seatId: "A1",
+        seatIds: ["A1"],
         customerName: "Jan",
         email: "jan@test.com",
       })
@@ -379,7 +380,7 @@ describe("ZAGROŻENIE 3: API Abuse – walidacja wejścia (service layer)", () =
     await expect(
       createReservation({
         eventId: VALID_EVENT_ID,
-        seatId: "Z99",
+        seatIds: ["Z99"],
         customerName: "Bot",
         email: "bot@test.com",
       })
@@ -390,7 +391,7 @@ describe("ZAGROŻENIE 3: API Abuse – walidacja wejścia (service layer)", () =
     await expect(
       createReservation({
         eventId: VALID_EVENT_ID,
-        seatId: "",
+        seatIds: [""],
         customerName: "Bot",
         email: "bot@test.com",
       })
@@ -402,7 +403,7 @@ describe("ZAGROŻENIE 3: API Abuse – walidacja wejścia (service layer)", () =
     await expect(
       createReservation({
         eventId: VALID_EVENT_ID,
-        seatId: "I1",
+        seatIds: ["I1"],
         customerName: "Bot",
         email: "bot@test.com",
       })
@@ -413,7 +414,7 @@ describe("ZAGROŻENIE 3: API Abuse – walidacja wejścia (service layer)", () =
     await expect(
       createReservation({
         eventId: VALID_EVENT_ID,
-        seatId: "A0",
+        seatIds: ["A0"],
         customerName: "Bot",
         email: "bot@test.com",
       })
@@ -424,7 +425,7 @@ describe("ZAGROŻENIE 3: API Abuse – walidacja wejścia (service layer)", () =
     await expect(
       createReservation({
         eventId: VALID_EVENT_ID,
-        seatId: "A11",
+        seatIds: ["A11"],
         customerName: "Bot",
         email: "bot@test.com",
       })
@@ -438,7 +439,7 @@ describe("ZAGROŻENIE 3: API Abuse – walidacja wejścia (service layer)", () =
     await expect(
       createReservation({
         eventId: VALID_EVENT_ID,
-        seatId: "'; DROP TABLE reservations; --",
+        seatIds: ["'; DROP TABLE reservations; --"],
         customerName: "Hacker",
         email: "h@h.com",
       })
@@ -449,7 +450,7 @@ describe("ZAGROŻENIE 3: API Abuse – walidacja wejścia (service layer)", () =
     await expect(
       createReservation({
         eventId: "{ $gt: '' }",
-        seatId: "A1",
+        seatIds: ["A1"],
         customerName: "Hacker",
         email: "h@h.com",
       })
@@ -465,7 +466,7 @@ describe("ZAGROŻENIE 3: API Abuse – walidacja wejścia (service layer)", () =
     const longEmail = "a".repeat(500) + "@test.com";
     const result = await createReservation({
       eventId: VALID_EVENT_ID,
-      seatId: "A1",
+      seatIds: ["A1"],
       customerName: "Long",
       email: longEmail,
     });
@@ -480,7 +481,7 @@ describe("ZAGROŻENIE 3: API Abuse – walidacja wejścia (service layer)", () =
     await expect(
       createReservation({
         eventId: "nieistniejacy-event-xyz",
-        seatId: "A1",
+        seatIds: ["A1"],
         customerName: "Bot",
         email: "bot@test.com",
       })
@@ -570,7 +571,7 @@ describe("ZAGROŻENIE 5: Spam / Resource Exhaustion", () => {
       seats.map((seat, i) =>
         createReservation({
           eventId: VALID_EVENT_ID,
-          seatId: seat,
+          seatIds: [seat],
           customerName: `Bot ${i}`,
           email: "spam@bot.com", // ten sam email
         })
@@ -599,7 +600,7 @@ describe("ZAGROŻENIE 5: Spam / Resource Exhaustion", () => {
       for (let num = 1; num <= 10; num++) {
         await createReservation({
           eventId: VALID_EVENT_ID,
-          seatId: `${row}${num}`,
+          seatIds: [`${row}${num}`],
           customerName: "Spammer",
           email: "spam@test.com",
         });
@@ -610,7 +611,7 @@ describe("ZAGROŻENIE 5: Spam / Resource Exhaustion", () => {
     await expect(
       createReservation({
         eventId: VALID_EVENT_ID,
-        seatId: "A1",
+        seatIds: ["A1"],
         customerName: "Pechowy",
         email: "late@test.com",
       })
@@ -626,7 +627,7 @@ describe("ZAGROŻENIE 5: Spam / Resource Exhaustion", () => {
     for (let num = 1; num <= 10; num++) {
       await createReservation({
         eventId: VALID_EVENT_ID,
-        seatId: `A${num}`,
+        seatIds: [`A${num}`],
         customerName: "Bot",
         email: `bot${num}@test.com`,
       });
@@ -670,5 +671,66 @@ describe("getEventById – testy podstawowe", () => {
     expect(e1).not.toBeNull();
     expect(e2).not.toBeNull();
     expect(e3).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. Rezerwacja wielu miejsc
+// ---------------------------------------------------------------------------
+
+describe("Rezerwacja wielu miejsc", () => {
+  beforeEach(resetStore);
+
+  const reserveSeats = (seatIds: string[], email = "multi@example.com") =>
+    createReservation({
+      eventId: VALID_EVENT_ID,
+      seatIds,
+      customerName: "Jan Kowalski",
+      email,
+    });
+
+  it("Rezerwuje kilka miejsc jedną rezerwacją", async () => {
+    const result = await reserveSeats(["C2", "C1", "C3"]);
+
+    expect(result.seatIds).toEqual(["C1", "C2", "C3"]);
+    expect(result.code).toMatch(/^TKT-C1-/);
+
+    const taken = await getTakenSeats(VALID_EVENT_ID);
+    expect(taken).toEqual(expect.arrayContaining(["C1", "C2", "C3"]));
+  });
+
+  it("Jedno zajęte miejsce blokuje całą rezerwację (all-or-nothing)", async () => {
+    await reserveSeats(["D2"], "first@example.com");
+
+    await expect(reserveSeats(["D1", "D2", "D3"], "second@example.com")).rejects.toThrow(
+      "SEAT_ALREADY_TAKEN"
+    );
+
+    const taken = await getTakenSeats(VALID_EVENT_ID);
+    expect(taken).not.toContain("D1");
+    expect(taken).not.toContain("D3");
+  });
+
+  it("Przekroczenie limitu miejsc → SEAT_INVALID", async () => {
+    await expect(
+      reserveSeats(["E1", "E2", "E3", "E4", "E5", "E6", "E7"])
+    ).rejects.toThrow("SEAT_INVALID");
+  });
+
+  it("Pusta lista miejsc → SEAT_INVALID", async () => {
+    await expect(reserveSeats([])).rejects.toThrow("SEAT_INVALID");
+  });
+
+  it("Zakup obejmuje wszystkie miejsca rezerwacji", async () => {
+    const { reservationId, code } = await reserveSeats(["F1", "F2"]);
+    const purchase = await purchaseReservation(reservationId);
+    expect(purchase.code).toBe(code);
+
+    const store = global._inMemoryStore!;
+    const res = store.reservations.find((r) => r._id === reservationId)!;
+    res.expiresAt = new Date(Date.now() - 3600 * 1000);
+
+    const taken = await getTakenSeats(VALID_EVENT_ID);
+    expect(taken).toEqual(expect.arrayContaining(["F1", "F2"]));
   });
 });

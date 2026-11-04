@@ -3,6 +3,7 @@
 // Interactive Cinema Seat Map component (Rows A-H, Seats 1-10)
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { MAX_SEATS_PER_RESERVATION } from "@/app/lib/seats";
 
 interface SeatMapClientProps {
   eventId: string;
@@ -17,7 +18,7 @@ export default function SeatMapClient({
   initialTakenSeats,
 }: SeatMapClientProps) {
   const router = useRouter();
-  const [selectedSeat, setSelectedSeat] = useState<string | null>(null);
+  const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
 
   // Group seats by row (letter prefix)
   const rows = ["A", "B", "C", "D", "E", "F", "G", "H"];
@@ -31,17 +32,21 @@ export default function SeatMapClient({
 
   const handleSeatClick = (seatId: string) => {
     if (initialTakenSeats.includes(seatId)) return;
-    if (selectedSeat === seatId) {
-      setSelectedSeat(null);
-    } else {
-      setSelectedSeat(seatId);
-    }
+    setSelectedSeats((current) => {
+      if (current.includes(seatId)) return current.filter((s) => s !== seatId);
+      if (current.length >= MAX_SEATS_PER_RESERVATION) return current;
+      return [...current, seatId];
+    });
   };
 
   const handleProceedToReservation = () => {
-    if (!selectedSeat) return;
-    router.push(`/reserve?eventId=${encodeURIComponent(eventId)}&seatId=${encodeURIComponent(selectedSeat)}`);
+    if (selectedSeats.length === 0) return;
+    router.push(
+      `/reserve?eventId=${encodeURIComponent(eventId)}&seats=${encodeURIComponent(selectedSeats.join(","))}`
+    );
   };
+
+  const limitReached = selectedSeats.length >= MAX_SEATS_PER_RESERVATION;
 
   return (
     <div className="w-full flex flex-col items-center">
@@ -89,7 +94,7 @@ export default function SeatMapClient({
                 <div className="flex items-center gap-2 sm:gap-2.5">
                   {rowSeats.map((seatId) => {
                     const isTaken = initialTakenSeats.includes(seatId);
-                    const isSelected = selectedSeat === seatId;
+                    const isSelected = selectedSeats.includes(seatId);
                     const { number } = parseSeat(seatId);
 
                     return (
@@ -125,14 +130,20 @@ export default function SeatMapClient({
 
       {/* Selected Seat Action Bar */}
       <div className="w-full max-w-md mt-8 p-4 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">
-        {selectedSeat ? (
+        {selectedSeats.length > 0 ? (
           <>
             <div className="text-center sm:text-left">
-              <div className="text-xs text-slate-400 font-medium">Wybrany fotel</div>
-              <div className="text-lg font-bold text-white">
-                Rząd {parseSeat(selectedSeat).row}, miejsce {parseSeat(selectedSeat).number}
-                <span className="text-xs text-amber-400 ml-2 font-mono">({selectedSeat})</span>
+              <div className="text-xs text-slate-400 font-medium">
+                Wybrane fotele ({selectedSeats.length}/{MAX_SEATS_PER_RESERVATION})
               </div>
+              <div className="text-lg font-bold text-white font-mono">
+                {selectedSeats.join(", ")}
+              </div>
+              {limitReached && (
+                <div className="text-xs text-amber-400 mt-1">
+                  Osiągnięto limit miejsc w jednej rezerwacji.
+                </div>
+              )}
             </div>
             <button
               type="button"
@@ -144,7 +155,7 @@ export default function SeatMapClient({
           </>
         ) : (
           <div className="w-full text-center text-slate-400 text-sm py-2">
-            Kliknij wolny fotel na mapie, aby przejść do rezerwacji.
+            Kliknij wolne fotele na mapie (maks. {MAX_SEATS_PER_RESERVATION}), aby przejść do rezerwacji.
           </div>
         )}
       </div>

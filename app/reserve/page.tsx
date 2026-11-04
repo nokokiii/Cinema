@@ -3,20 +3,23 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { connection } from "next/server";
 import { getEventById } from "@/app/lib/events-service";
+import { parseSeatsParam } from "@/app/lib/seats";
 import ReserveFormClient from "./reserve-form-client";
 
 export const instant = false;
 
 async function ReserveContent({
   eventId,
-  seatId,
+  seats,
 }: {
   eventId?: string;
-  seatId?: string;
+  seats?: string;
 }) {
   await connection();
 
-  if (!eventId || !seatId) {
+  const seatIds = parseSeatsParam(seats);
+
+  if (!eventId || seatIds.length === 0) {
     return (
       <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center shadow-xl">
         <div className="text-4xl mb-4">⚠️</div>
@@ -54,15 +57,15 @@ async function ReserveContent({
     );
   }
 
-  return <ReserveFormClient event={event} seatId={seatId} />;
+  return <ReserveFormClient event={event} seatIds={seatIds} />;
 }
 
 export default async function ReservePage({
   searchParams,
 }: {
-  searchParams: Promise<{ eventId?: string; seatId?: string }>;
+  searchParams: Promise<{ eventId?: string; seats?: string }>;
 }) {
-  const { eventId, seatId } = await searchParams;
+  const { eventId, seats } = await searchParams;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -93,7 +96,7 @@ export default async function ReservePage({
             </div>
           }
         >
-          <ReserveContent eventId={eventId} seatId={seatId} />
+          <ReserveContent eventId={eventId} seats={seats} />
         </Suspense>
       </main>
     </div>

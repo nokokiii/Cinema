@@ -59,19 +59,20 @@ export async function POST(request: Request) {
     const origin = new URL(request.url).origin;
     const encodedReservationId = encodeURIComponent(details.reservation._id);
     const encodedEventId = encodeURIComponent(details.reservation.eventId);
-    const encodedSeatId = encodeURIComponent(details.reservation.seatId);
+    const { seatIds } = details.reservation;
+    const encodedSeats = encodeURIComponent(seatIds.join(","));
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       allowed_payment_method_types: ["card"],
       line_items: [
         {
-          quantity: 1,
+          quantity: seatIds.length,
           price_data: {
             currency,
             unit_amount: ticketPriceMinor,
             product_data: {
-              name: `${details.event.title} (${details.reservation.seatId})`,
+              name: `${details.event.title} (${seatIds.join(", ")})`,
               description: `${details.event.hall} • ${new Date(
                 details.event.startsAt,
               ).toLocaleString("pl-PL")}`,
@@ -83,10 +84,10 @@ export async function POST(request: Request) {
         reservationId: details.reservation._id,
         reservationCode: details.reservation.code,
         eventId: details.reservation.eventId,
-        seatId: details.reservation.seatId,
+        seatIds: seatIds.join(","),
       },
       success_url: `${origin}/reservations/${encodedReservationId}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/reserve?eventId=${encodedEventId}&seatId=${encodedSeatId}&checkout=cancelled`,
+      cancel_url: `${origin}/reserve?eventId=${encodedEventId}&seats=${encodedSeats}&checkout=cancelled`,
     });
 
     if (!session.url) {
