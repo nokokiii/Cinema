@@ -1,11 +1,15 @@
 // GET /api/events/:id - Returns event details and taken seats list
 import { NextResponse } from "next/server";
 import { getEventById, getTakenSeats } from "@/app/lib/events-service";
+import { enforceRateLimit } from "@/app/lib/rate-limit";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const limited = enforceRateLimit(request, "events");
+  if (limited) return limited;
+
   try {
     const { id } = await params;
     const event = await getEventById(id);

@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { getReservationDetails } from "@/app/lib/events-service";
 import { getStripeConfig, stripe } from "@/app/lib/stripe";
+import { enforceRateLimit } from "@/app/lib/rate-limit";
 
 export async function POST(request: Request) {
+  const limited = enforceRateLimit(request, "purchase");
+  if (limited) return limited;
+
   try {
     if (!stripe) {
       return NextResponse.json(

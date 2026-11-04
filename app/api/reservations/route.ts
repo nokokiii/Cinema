@@ -1,8 +1,12 @@
 // POST /api/reservations - Reserves a seat for 15 minutes (or 2 minutes in testing)
 import { NextResponse } from "next/server";
 import { createReservation } from "@/app/lib/events-service";
+import { enforceRateLimit } from "@/app/lib/rate-limit";
 
 export async function POST(request: Request) {
+  const limited = enforceRateLimit(request, "createReservation");
+  if (limited) return limited;
+
   try {
     const body = await request.json();
     const { eventId, seatId, customerName, email } = body;

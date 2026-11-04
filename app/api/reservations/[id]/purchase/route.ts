@@ -1,11 +1,15 @@
 // POST /api/reservations/:id/purchase - Finalizes reservation and purchases ticket
 import { NextResponse } from "next/server";
 import { purchaseReservation } from "@/app/lib/events-service";
+import { enforceRateLimit } from "@/app/lib/rate-limit";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const limited = enforceRateLimit(request, "purchase");
+  if (limited) return limited;
+
   try {
     const { id } = await params;
     const result = await purchaseReservation(id);

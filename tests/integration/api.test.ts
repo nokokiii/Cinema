@@ -5,7 +5,7 @@
  * Testy te uderzają w DZIAŁAJĄCY serwer Next.js (lub jego adres testowy).
  *
  * Uruchomienie:
- *   1. W jednym terminalu: RESERVATION_TIMEOUT_MINUTES=0 npm run dev
+ *   1. W jednym terminalu: RESERVATION_TIMEOUT_MINUTES=0 RATE_LIMIT_DISABLED=true npm run dev
  *   2. W drugim:           npx jest tests/integration/api.test.ts --verbose
  *
  * Domyślnie testy uderzają w http://localhost:3000.
