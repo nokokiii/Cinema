@@ -80,7 +80,7 @@ async function TicketContent({ code }: { code: string }) {
           <span className="text-xs uppercase font-extrabold tracking-wider opacity-80">
             {reservation.status === "PURCHASED" ? "Bilet Elektroniczny" : "Potwierdzenie Rezerwacji"}
           </span>
-          <h1 className="text-2xl font-black tracking-tight">Kino Gwiazda</h1>
+          <h1 className="text-2xl font-black tracking-tight">Kino</h1>
         </div>
         <div className="text-right">
           <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-950 text-amber-400">
