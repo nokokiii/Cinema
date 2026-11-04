@@ -761,3 +761,38 @@ describe("Idempotentność tworzenia rezerwacji", () => {
     await expect(makeReservation({ seatId: "G6" })).rejects.toThrow("SEAT_ALREADY_TAKEN");
   });
 });
+
+// ---------------------------------------------------------------------------
+// 9. Przejścia stanów przy zakupie
+// ---------------------------------------------------------------------------
+
+describe("Przejścia stanów przy zakupie", () => {
+  beforeEach(resetStore);
+
+  const findReservation = (id: string) =>
+    global._inMemoryStore!.reservations.find((r) => r._id === id)!;
+
+  it("RESERVED → PURCHASED ustawia purchasedAt dokładnie raz przy wielokrotnym zakupie", async () => {
+    const { reservationId } = await makeReservation({ seatId: "H1" });
+
+    await purchaseReservation(reservationId);
+    const firstPurchasedAt = findReservation(reservationId).purchasedAt;
+
+    await Promise.all([purchaseReservation(reservationId), purchaseReservation(reservationId)]);
+
+    expect(findReservation(reservationId).status).toBe("PURCHASED");
+    expect(findReservation(reservationId).purchasedAt).toBe(firstPurchasedAt);
+  });
+
+  it("Zakup po expiresAt oznacza rezerwację jako EXPIRED i kolejne próby też odmawiają", async () => {
+    const { reservationId } = await makeReservation({ seatId: "H2" });
+    findReservation(reservationId).expiresAt = new Date(Date.now() - 1000);
+
+    await expect(purchaseReservation(reservationId)).rejects.toThrow("RESERVATION_EXPIRED");
+    expect(findReservation(reservationId).status).toBe("EXPIRED");
+    await expect(purchaseReservation(reservationId)).rejects.toThrow("RESERVATION_EXPIRED");
+
+    const taken = await getTakenSeats(VALID_EVENT_ID);
+    expect(taken).not.toContain("H2");
+  });
+});

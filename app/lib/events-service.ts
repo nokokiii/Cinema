@@ -380,65 +380,76 @@ function ensureIndexes(db: Db): Promise<void> {
 
 /**
  * Purchases a reservation and confirms the ticket.
+ * Idempotent: purchasing an already purchased reservation returns the same code.
  * Fails if reservation does not exist or has expired.
  */
 export async function purchaseReservation(idOrCode: string): Promise<{ code: string }> {
-  const now = new Date();
   const db = await getDb();
+  const now = new Date();
+  return db ? purchaseReservationInMongo(db, idOrCode, now) : purchaseReservationInMemory(idOrCode, now);
+}
 
-  let reservation: ReservationDocument | null = null;
-
-  if (db) {
-    reservation = await db.collection<ReservationDocument>("reservations").findOne({
-      $or: [{ _id: idOrCode }, { code: idOrCode }],
-    });
-  } else {
-    reservation =
-      getMemoryStore().reservations.find(
-        (r) => r._id === idOrCode || r.code === idOrCode
-      ) ?? null;
-  }
-
+function purchaseReservationInMemory(idOrCode: string, now: Date): { code: string } {
+  const reservation = getMemoryStore().reservations.find(
+    (r) => r._id === idOrCode || r.code === idOrCode
+  );
   if (!reservation) {
     throw new Error("RESERVATION_NOT_FOUND");
   }
 
-  // If already purchased, return the existing ticket code
   if (reservation.status === "PURCHASED") {
     return { code: reservation.code };
   }
 
-  // Check if expired
-  const expiryDate = new Date(reservation.expiresAt);
-  if (expiryDate <= now || reservation.status === "EXPIRED") {
-    if (db) {
-      await db.collection<ReservationDocument>("reservations").updateOne(
-        { _id: reservation._id },
-        { $set: { status: "EXPIRED" } }
-      );
-    } else {
-      reservation.status = "EXPIRED";
-    }
+  if (reservation.status === "EXPIRED" || new Date(reservation.expiresAt) <= now) {
+    reservation.status = "EXPIRED";
     throw new Error("RESERVATION_EXPIRED");
   }
 
-  // Confirm purchase
-  if (db) {
-    await db.collection<ReservationDocument>("reservations").updateOne(
-      { _id: reservation._id },
-      {
-        $set: {
-          status: "PURCHASED",
-          purchasedAt: now,
-        },
-      }
-    );
-  } else {
-    reservation.status = "PURCHASED";
-    reservation.purchasedAt = now;
+  reservation.status = "PURCHASED";
+  reservation.purchasedAt = now;
+  return { code: reservation.code };
+}
+
+/**
+ * RESERVED -> PURCHASED happens in a single conditional update, so concurrent purchases
+ * and expiry cannot interleave with it; only one caller performs the transition.
+ */
+async function purchaseReservationInMongo(
+  db: Db,
+  idOrCode: string,
+  now: Date
+): Promise<{ code: string }> {
+  const reservations = db.collection<ReservationDocument>("reservations");
+  const match = { $or: [{ _id: idOrCode }, { code: idOrCode }] };
+
+  const purchased = await reservations.findOneAndUpdate(
+    { ...match, status: "RESERVED", expiresAt: { $gt: now } },
+    { $set: { status: "PURCHASED", purchasedAt: now } },
+    { returnDocument: "after" }
+  );
+
+  if (purchased) {
+    await db
+      .collection<SeatLockDocument>("seatLocks")
+      .updateMany({ reservationId: purchased._id }, { $set: { status: "PURCHASED" } });
+    return { code: purchased.code };
   }
 
-  return { code: reservation.code };
+  const existing = await reservations.findOne(match);
+  if (!existing) {
+    throw new Error("RESERVATION_NOT_FOUND");
+  }
+
+  if (existing.status === "PURCHASED") {
+    return { code: existing.code };
+  }
+
+  await reservations.updateOne(
+    { _id: existing._id, status: "RESERVED", expiresAt: { $lte: now } },
+    { $set: { status: "EXPIRED" } }
+  );
+  throw new Error("RESERVATION_EXPIRED");
 }
 
 /**
