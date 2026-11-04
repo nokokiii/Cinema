@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { getAllEvents } from "@/app/lib/events-service";
 import { enforceRateLimit } from "@/app/lib/rate-limit";
+import { serviceErrorResponse } from "@/app/lib/api-errors";
 
 export async function GET(request: Request) {
   const limited = enforceRateLimit(request, "events");
@@ -11,7 +12,6 @@ export async function GET(request: Request) {
     const events = await getAllEvents();
     return NextResponse.json(events);
   } catch (error) {
-    console.error("Failed to fetch events:", error);
-    return NextResponse.json({ error: "Failed to fetch events" }, { status: 500 });
+    return serviceErrorResponse(error, "Failed to fetch events");
   }
 }

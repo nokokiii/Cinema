@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getReservationDetails } from "@/app/lib/events-service";
 import { getStripeConfig, stripe } from "@/app/lib/stripe";
 import { enforceRateLimit } from "@/app/lib/rate-limit";
+import { isValidReservationIdOrCode } from "@/app/lib/validation";
+import { apiError } from "@/app/lib/api-errors";
 
 export async function POST(request: Request) {
   const limited = enforceRateLimit(request, "purchase");
@@ -15,15 +17,16 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
     const reservationId =
       typeof body?.reservationId === "string" ? body.reservationId : "";
 
     if (!reservationId) {
-      return NextResponse.json(
-        { error: "Missing reservationId" },
-        { status: 400 },
-      );
+      return apiError(400, "Missing reservationId");
+    }
+
+    if (!isValidReservationIdOrCode(reservationId)) {
+      return apiError(400, "Invalid reservation id format");
     }
 
     const details = await getReservationDetails(reservationId);

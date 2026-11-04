@@ -16,6 +16,7 @@
  * ============================================================================
  */
 
+import { randomUUID } from "crypto";
 import { describe, expect, it } from "@jest/globals";
 
 const BASE_URL = process.env.TEST_BASE_URL ?? "http://localhost:3000";
@@ -304,8 +305,13 @@ describe("API: ZAGROŻENIE 3 – API Abuse & walidacja wejścia", () => {
   });
 
   it("[3-B] Zakup nieistniejącej rezerwacji → 404", async () => {
-    const res = await api("POST", "/api/reservations/nonexistent-id-xyz/purchase");
+    const res = await api("POST", `/api/reservations/${randomUUID()}/purchase`);
     expect(res.status).toBe(404);
+  });
+
+  it("[3-B] Zakup z id w złym formacie → 400 (bez zapytania do bazy)", async () => {
+    const res = await api("POST", "/api/reservations/nonexistent-id-xyz/purchase");
+    expect(res.status).toBe(400);
   });
 
   it("[3-B] GET nieistniejącego eventu → 404", async () => {
@@ -314,8 +320,18 @@ describe("API: ZAGROŻENIE 3 – API Abuse & walidacja wejścia", () => {
   });
 
   it("[3-B] GET nieistniejącej rezerwacji → 404", async () => {
-    const res = await api("GET", "/api/reservations/nieistniejaca-rezerwacja-xyz");
+    const res = await api("GET", `/api/reservations/${randomUUID()}`);
     expect(res.status).toBe(404);
+  });
+
+  it("[3-B] GET rezerwacji z id w złym formacie → 400", async () => {
+    const res = await api("GET", "/api/reservations/nieistniejaca-rezerwacja-xyz");
+    expect(res.status).toBe(400);
+  });
+
+  it("[3-B] GET eventu z id w złym formacie → 400", async () => {
+    const res = await api("GET", "/api/events/%24where%3A1");
+    expect(res.status).toBe(400);
   });
 
   // -------------------------------------------------------------------------
@@ -451,7 +467,7 @@ describe("API: ZAGROŻENIE 4 – Idempotencja & Retry Storm", () => {
   // Wariant B – skrajny: nieznany Idempotency-Key
   // -------------------------------------------------------------------------
   it("[4-B-negative] Nieznany klucz idempotentności → 404 (nie 500)", async () => {
-    const res = await api("POST", "/api/reservations/FAKE-KEY-DOES-NOT-EXIST/purchase");
+    const res = await api("POST", "/api/reservations/TKT-Z9-FFFFFF/purchase");
     expect(res.status).toBe(404);
     expect(res.status).not.toBe(500);
   });

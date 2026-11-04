@@ -2,6 +2,8 @@
 import { NextResponse } from "next/server";
 import { getEventById, getTakenSeats } from "@/app/lib/events-service";
 import { enforceRateLimit } from "@/app/lib/rate-limit";
+import { isValidEventId } from "@/app/lib/validation";
+import { apiError, serviceErrorResponse } from "@/app/lib/api-errors";
 
 export async function GET(
   request: Request,
@@ -10,12 +12,15 @@ export async function GET(
   const limited = enforceRateLimit(request, "events");
   if (limited) return limited;
 
-  try {
-    const { id } = await params;
-    const event = await getEventById(id);
+  const { id } = await params;
+  if (!isValidEventId(id)) {
+    return apiError(400, "Invalid event id format");
+  }
 
+  try {
+    const event = await getEventById(id);
     if (!event) {
-      return NextResponse.json({ error: "Event not found" }, { status: 404 });
+      return apiError(404, "Event not found");
     }
 
     const takenSeats = await getTakenSeats(id);
@@ -25,7 +30,6 @@ export async function GET(
       takenSeats,
     });
   } catch (error) {
-    console.error("Failed to fetch event:", error);
-    return NextResponse.json({ error: "Failed to fetch event" }, { status: 500 });
+    return serviceErrorResponse(error, "Failed to fetch event");
   }
 }

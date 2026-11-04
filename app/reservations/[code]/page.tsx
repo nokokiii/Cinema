@@ -3,13 +3,16 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { connection } from "next/server";
 import { getReservationDetails } from "@/app/lib/events-service";
+import { isValidReservationIdOrCode } from "@/app/lib/validation";
 
 export const instant = false;
 
 async function TicketContent({ code }: { code: string }) {
   await connection();
   const decodedCode = decodeURIComponent(code);
-  const details = await getReservationDetails(decodedCode);
+  const details = isValidReservationIdOrCode(decodedCode)
+    ? await getReservationDetails(decodedCode)
+    : null;
 
   if (!details) {
     return (

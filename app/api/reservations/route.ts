@@ -2,53 +2,29 @@
 import { NextResponse } from "next/server";
 import { createReservation } from "@/app/lib/events-service";
 import { enforceRateLimit } from "@/app/lib/rate-limit";
+import { validateCreateReservationPayload } from "@/app/lib/validation";
+import { apiError, serviceErrorResponse } from "@/app/lib/api-errors";
 
 export async function POST(request: Request) {
   const limited = enforceRateLimit(request, "createReservation");
   if (limited) return limited;
 
+  let body: unknown;
   try {
-    const body = await request.json();
-    const { eventId, seatId, seatIds, customerName, email } = body;
-    const seats: string[] = Array.isArray(seatIds)
-      ? seatIds.map(String)
-      : seatId
-        ? [String(seatId)]
-        : [];
+    body = await request.json();
+  } catch {
+    return apiError(400, "Request body must be valid JSON");
+  }
 
-    // Validate required fields
-    if (!eventId || seats.length === 0 || !customerName || !email) {
-      return NextResponse.json(
-        { error: "Missing required fields: eventId, seatId (or seatIds), customerName, email" },
-        { status: 400 }
-      );
-    }
+  const validation = validateCreateReservationPayload(body);
+  if (!validation.ok) {
+    return apiError(400, validation.error);
+  }
 
-    const result = await createReservation({
-      eventId: String(eventId),
-      seatIds: seats,
-      customerName: String(customerName),
-      email: String(email),
-    });
-
+  try {
+    const result = await createReservation(validation.value);
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
-    if (error instanceof Error) {
-      if (error.message === "EVENT_NOT_FOUND") {
-        return NextResponse.json({ error: "Event not found" }, { status: 404 });
-      }
-      if (error.message === "SEAT_INVALID") {
-        return NextResponse.json({ error: "Invalid seats for this screening" }, { status: 400 });
-      }
-      if (error.message === "SEAT_ALREADY_TAKEN") {
-        return NextResponse.json(
-          { error: "Seat is already reserved or purchased" },
-          { status: 409 }
-        );
-      }
-    }
-
-    console.error("Failed to create reservation:", error);
-    return NextResponse.json({ error: "Failed to create reservation" }, { status: 500 });
+    return serviceErrorResponse(error, "Failed to create reservation");
   }
 }

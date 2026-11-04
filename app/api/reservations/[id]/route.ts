@@ -2,6 +2,8 @@
 import { NextResponse } from "next/server";
 import { getReservationDetails } from "@/app/lib/events-service";
 import { enforceRateLimit } from "@/app/lib/rate-limit";
+import { isValidReservationIdOrCode } from "@/app/lib/validation";
+import { apiError, serviceErrorResponse } from "@/app/lib/api-errors";
 
 export async function GET(
   request: Request,
@@ -10,17 +12,18 @@ export async function GET(
   const limited = enforceRateLimit(request, "getReservation");
   if (limited) return limited;
 
+  const { id } = await params;
+  if (!isValidReservationIdOrCode(id)) {
+    return apiError(400, "Invalid reservation id format");
+  }
+
   try {
-    const { id } = await params;
     const details = await getReservationDetails(id);
-
     if (!details) {
-      return NextResponse.json({ error: "Reservation not found" }, { status: 404 });
+      return apiError(404, "Reservation not found");
     }
-
     return NextResponse.json(details);
   } catch (error) {
-    console.error("Failed to fetch reservation:", error);
-    return NextResponse.json({ error: "Failed to fetch reservation" }, { status: 500 });
+    return serviceErrorResponse(error, "Failed to fetch reservation");
   }
 }
