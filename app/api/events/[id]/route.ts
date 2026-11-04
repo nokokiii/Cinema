@@ -1,6 +1,7 @@
 // GET /api/events/:id - Returns event details and taken seats list
 import { NextResponse } from "next/server";
-import { getEventById, getTakenSeats } from "@/app/lib/events-service";
+import { getTakenSeats } from "@/app/lib/events-service";
+import { getCachedEventById } from "@/app/lib/cached-events";
 import { enforceRateLimit } from "@/app/lib/rate-limit";
 import { isValidEventId } from "@/app/lib/validation";
 import { apiError, serviceErrorResponse } from "@/app/lib/api-errors";
@@ -18,7 +19,7 @@ export async function GET(
   }
 
   try {
-    const event = await getEventById(id);
+    const event = await getCachedEventById(id);
     if (!event) {
       return apiError(404, "Event not found");
     }

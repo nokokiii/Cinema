@@ -2,7 +2,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { connection } from "next/server";
-import { getEventById } from "@/app/lib/events-service";
+import { getCachedEventById } from "@/app/lib/cached-events";
 import { parseSeatsParam } from "@/app/lib/seats";
 import ReserveFormClient from "./reserve-form-client";
 
@@ -37,7 +37,7 @@ async function ReserveContent({
     );
   }
 
-  const event = await getEventById(eventId);
+  const event = await getCachedEventById(eventId);
 
   if (!event) {
     return (

@@ -2,13 +2,14 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { connection } from "next/server";
-import { getAllEvents, getTakenSeats } from "@/app/lib/events-service";
+import { getTakenSeats } from "@/app/lib/events-service";
+import { getCachedEvents } from "@/app/lib/cached-events";
 
 export const instant = false;
 
 async function ScreeningsList() {
   await connection();
-  const events = await getAllEvents();
+  const events = await getCachedEvents();
 
   // Fetch taken seats for each event to show real-time availability
   const eventsWithAvailability = await Promise.all(

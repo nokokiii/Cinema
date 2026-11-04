@@ -3,14 +3,15 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
-import { getEventById, getTakenSeats } from "@/app/lib/events-service";
+import { getTakenSeats } from "@/app/lib/events-service";
+import { getCachedEventById } from "@/app/lib/cached-events";
 import SeatMapClient from "./seat-map-client";
 
 export const instant = false;
 
 async function EventDetailsContent({ eventId }: { eventId: string }) {
   await connection();
-  const event = await getEventById(eventId);
+  const event = await getCachedEventById(eventId);
 
   if (!event) {
     notFound();
