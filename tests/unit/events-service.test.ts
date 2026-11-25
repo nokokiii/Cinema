@@ -81,6 +81,18 @@ describe("Helpers & utilities", () => {
     delete process.env.RESERVATION_TIMEOUT_MINUTES;
   });
 
+  it("getReservationTimeoutMinutes() akceptuje 0 jako natychmiastowe wygaśnięcie", () => {
+    process.env.RESERVATION_TIMEOUT_MINUTES = "0";
+    expect(getReservationTimeoutMinutes()).toBe(0);
+    delete process.env.RESERVATION_TIMEOUT_MINUTES;
+  });
+
+  it("getReservationTimeoutMinutes() akceptuje wartości ułamkowe (np. sekundy)", () => {
+    process.env.RESERVATION_TIMEOUT_MINUTES = "0.05";
+    expect(getReservationTimeoutMinutes()).toBeCloseTo(0.05);
+    delete process.env.RESERVATION_TIMEOUT_MINUTES;
+  });
+
   it("generateTicketCode() ma poprawny format TKT-XX-XXXXXX", () => {
     const code = generateTicketCode("A1");
     expect(code).toMatch(/^TKT-A1-[0-9A-F]{6}$/);
@@ -168,9 +180,8 @@ describe("ZAGROŻENIE 1: Double Booking", () => {
   // -------------------------------------------------------------------------
   it("[1-B-behavior] Wygasła rezerwacja NIE blokuje nowej", async () => {
     /**
-     * getReservationTimeoutMinutes() odrzuca wartość 0 (parsed > 0 = false)
-     * i fallbackuje do 15. Zamiast tego manipulujemy expiresAt bezpośrednio
-     * w in-memory store – jest to uczciwy test warstwy getTakenSeats().
+     * Manipulujemy expiresAt bezpośrednio w in-memory store zamiast czekać na
+     * realny timeout – szybszy i równie uczciwy test warstwy getTakenSeats().
      */
     process.env.RESERVATION_TIMEOUT_MINUTES = "15";
     const { reservationId } = await makeReservation({ seatId: "D4", email: "first@example.com" });
@@ -218,10 +229,9 @@ describe("ZAGROŻENIE 2: Wiszące rezerwacje-zombi", () => {
   it("[2-A] Wygasła rezerwacja znika z takenSeats", async () => {
     /**
      * TIME-TRAVEL PATTERN:
-     * getReservationTimeoutMinutes() wymaga parsed > 0, więc timeout=0 fallbackuje do 15.
-     * Zamiast tego: tworzymy rezerwację normalnie, a następnie ręcznie
-     * cofamy expiresAt w in-memory store (symulacja clock-travel).
-     * Jest to prawidłowy wzorzec testowy (bez mocking całego systemu czasu).
+     * Tworzymy rezerwację normalnie, a następnie ręcznie cofamy expiresAt
+     * w in-memory store (symulacja clock-travel), zamiast czekać na realny
+     * timeout – prawidłowy wzorzec testowy bez mockowania całego systemu czasu.
      */
     process.env.RESERVATION_TIMEOUT_MINUTES = "15";
     const { reservationId } = await makeReservation({ seatId: "F6" });

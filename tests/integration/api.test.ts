@@ -5,7 +5,9 @@
  * Testy te uderzają w DZIAŁAJĄCY serwer Next.js (lub jego adres testowy).
  *
  * Uruchomienie:
- *   1. W jednym terminalu: RESERVATION_TIMEOUT_MINUTES=0 RATE_LIMIT_DISABLED=true npm run dev
+ *   1. W jednym terminalu: RESERVATION_TIMEOUT_MINUTES=0.05 RATE_LIMIT_DISABLED=true npm run dev
+ *      (0.05 min = 3s: krótko, ale z zapasem na natychmiastowy zakup po rezerwacji;
+ *       literalne 0 wygasa przed jakimkolwiek kolejnym requestem i psuje testy 1-C/4-*)
  *   2. W drugim:           npx jest tests/integration/api.test.ts --verbose
  *
  * Domyślnie testy uderzają w http://localhost:3000.
@@ -174,44 +176,44 @@ describe("API: ZAGROŻENIE 1 – Double Booking", () => {
 describe("API: ZAGROŻENIE 2 – Wiszące rezerwacje-zombi", () => {
   /**
    * UWAGA: Warianty 2-A i 2-B wymagają uruchomienia serwera z:
-   *   RESERVATION_TIMEOUT_MINUTES=0 npm run dev
-   * Wtedy rezerwacje wygasają natychmiastowo.
+   *   RESERVATION_TIMEOUT_MINUTES=0.05 npm run dev   (0.05 min = 3s)
+   * Wtedy rezerwacje wygasają po ~3s; poniższe testy czekają dłużej niż to okno.
    */
 
   // -------------------------------------------------------------------------
-  // Wariant A – Wygasły fotel znika z takenSeats (wymaga timeout=0)
+  // Wariant A – Wygasły fotel znika z takenSeats (wymaga timeout=0.05)
   // -------------------------------------------------------------------------
-  it("[2-A] Wygasły fotel NIE jest w takenSeats [wymaga RESERVATION_TIMEOUT_MINUTES=0]", async () => {
+  it("[2-A] Wygasły fotel NIE jest w takenSeats [wymaga RESERVATION_TIMEOUT_MINUTES=0.05]", async () => {
     const seat = nextSeat();
     const res = await reserveSeat(seat);
     expect(res.status).toBe(201);
 
-    // Czekamy chwilę (przy timeout=0, expiresAt jest już przeszłością)
-    await new Promise((r) => setTimeout(r, 200));
+    // Czekamy dłużej niż okno rezerwacji (3s), żeby expiresAt był już przeszłością
+    await new Promise((r) => setTimeout(r, 3500));
 
     const eventRes = await api("GET", `/api/events/${VALID_EVENT_ID}`);
     expect(eventRes.status).toBe(200);
 
     const takenSeats = eventRes.body.takenSeats as string[];
     expect(takenSeats).not.toContain(seat);
-  });
+  }, 10000);
 
   // -------------------------------------------------------------------------
-  // Wariant B – Zakup wygasłej rezerwacji (wymaga timeout=0)
+  // Wariant B – Zakup wygasłej rezerwacji (wymaga timeout=0.05)
   // -------------------------------------------------------------------------
-  it("[2-B] Zakup wygasłej rezerwacji → 410 Gone [wymaga RESERVATION_TIMEOUT_MINUTES=0]", async () => {
+  it("[2-B] Zakup wygasłej rezerwacji → 410 Gone [wymaga RESERVATION_TIMEOUT_MINUTES=0.05]", async () => {
     const seat = nextSeat();
     const res = await reserveSeat(seat);
     expect(res.status).toBe(201);
 
     const reservationId = res.body.reservationId as string;
 
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 3500));
 
     const purchase = await api("POST", `/api/reservations/${reservationId}/purchase`);
     expect(purchase.status).toBe(410); // Gone – wygasła
     expect(String(purchase.body.error)).toMatch(/expired/i);
-  });
+  }, 10000);
 
   // -------------------------------------------------------------------------
   // Wariant C – Graniczny: zakup tuż po wygaśnięciu
