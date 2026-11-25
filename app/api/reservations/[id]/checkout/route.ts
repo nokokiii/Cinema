@@ -56,8 +56,9 @@ export async function POST(
 
     const { reservation, event } = details;
 
-    // Reuse an already-open session instead of creating a second payable one for
-    // the same reservation (two live sessions would let the seat be paid twice).
+    // Fast-path reuse so an obvious retry skips an extra Stripe round-trip; the real
+    // guarantee against two live payable sessions is the idempotency key below, which
+    // Stripe enforces itself even under genuine concurrent requests.
     if (reservation.stripeSessionId) {
       const existingSession = await stripe.checkout.sessions
         .retrieve(reservation.stripeSessionId)
@@ -101,31 +102,40 @@ export async function POST(
     const encodedEventId = encodeURIComponent(reservation.eventId);
     const encodedSeats = encodeURIComponent(reservation.seatIds.join(","));
 
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      allowed_payment_method_types: ["card"],
-      line_items: [
-        {
-          quantity: 1,
-          price_data: {
-            currency,
-            unit_amount: amountDue,
-            product_data: {
-              name: `${event.title} (${reservation.seatIds.join(", ")})`,
-              description: `${event.hall} • ${new Date(event.startsAt).toLocaleString("pl-PL")}`,
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "payment",
+        allowed_payment_method_types: ["card"],
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency,
+              unit_amount: amountDue,
+              product_data: {
+                name: `${event.title} (${reservation.seatIds.join(", ")})`,
+                description: `${event.hall} • ${new Date(event.startsAt).toLocaleString("pl-PL")}`,
+              },
             },
           },
+        ],
+        metadata: {
+          reservationId: reservation._id,
+          reservationCode: reservation.code,
+          eventId: reservation.eventId,
+          seatIds: reservation.seatIds.join(","),
         },
-      ],
-      metadata: {
-        reservationId: reservation._id,
-        reservationCode: reservation.code,
-        eventId: reservation.eventId,
-        seatIds: reservation.seatIds.join(","),
+        success_url: `${origin}/reservations/${encodedReservationId}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${origin}/reserve?eventId=${encodedEventId}&seats=${encodedSeats}&reservationId=${encodedReservationId}&checkout=cancelled`,
       },
-      success_url: `${origin}/reservations/${encodedReservationId}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/reserve?eventId=${encodedEventId}&seats=${encodedSeats}&reservationId=${encodedReservationId}&checkout=cancelled`,
-    });
+      {
+        // Two concurrent/double-clicked requests for the same reservation (and, after the
+        // atomic points commit above, the same amountDue) collapse into the one session
+        // Stripe actually creates — this is what stops the seat from being paid for twice,
+        // not the reuse check above, which is only a fast path.
+        idempotencyKey: `checkout:${reservation._id}`,
+      }
+    );
 
     if (!session.url) {
       return NextResponse.json(

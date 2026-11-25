@@ -83,4 +83,29 @@ describe("Loyalty: fallback provider (no Voucherify credentials)", () => {
     expect(balanceA).toBe(1100);
     expect(balanceB).toBe(WELCOME_BONUS_POINTS);
   });
+
+  // -------------------------------------------------------------------------
+  // Odporność na wyścigi: ten sam wzorzec zagrożenia co double-booking (B2),
+  // tylko że na saldzie punktów zamiast na miejscu.
+  // -------------------------------------------------------------------------
+  it("[race] 10 równoczesnych adjustBalance() dla tego samego klienta: żadna zmiana nie ginie", async () => {
+    const provider = getLoyaltyProvider();
+    await provider.getBalance("race@example.com"); // enroll with 1000
+
+    await Promise.all(
+      Array.from({ length: 10 }, () => provider.adjustBalance("race@example.com", 50))
+    );
+
+    const finalBalance = await provider.getBalance("race@example.com");
+    expect(finalBalance).toBe(WELCOME_BONUS_POINTS + 10 * 50);
+  });
+
+  it("[race] 5 równoczesnych nowych klientów: każdy dostaje dokładnie 1000 punktów startowych", async () => {
+    const provider = getLoyaltyProvider();
+    const emails = Array.from({ length: 5 }, (_, i) => `concurrent-${i}@example.com`);
+
+    const balances = await Promise.all(emails.map((email) => provider.getBalance(email)));
+
+    balances.forEach((balance) => expect(balance).toBe(WELCOME_BONUS_POINTS));
+  });
 });

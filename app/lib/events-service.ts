@@ -602,37 +602,94 @@ export async function setReservationStripeSession(
 
 /**
  * Commits the points a customer spends on a reservation, exactly once: the amount is
- * deducted from their loyalty balance right away (Etap III Karta B), and recorded on the
- * reservation so a retried checkout call never deducts twice. No-op if already committed.
+ * deducted from their loyalty balance, and recorded on the reservation so a retried or
+ * concurrent checkout call for the same reservation never deducts twice (Etap III Karta B).
+ *
+ * The "not yet committed" check is made atomic per backend — otherwise two concurrent
+ * checkout calls (the same double-click / parallel-request pattern the Etap I/II criteria
+ * test for double-booking) would both read pointsUsed as unset and both deduct, exactly the
+ * class of bug those criteria exist to catch, just against the wallet instead of a seat.
  */
 export async function commitReservationPoints(
   reservation: ReservationDocument,
   points: number
 ): Promise<void> {
-  if (reservation.pointsUsed !== undefined || points <= 0) return;
-
-  await getLoyaltyProvider().adjustBalance(reservation.email, -points);
-  reservation.pointsUsed = points;
+  if (reservation.pointsUsed !== undefined) return;
+  if (points <= 0) {
+    reservation.pointsUsed = 0;
+    return;
+  }
 
   const db = await getDb();
+
   if (db) {
-    await db
+    const won = await db
       .collection<ReservationDocument>("reservations")
-      .updateOne({ _id: reservation._id }, { $set: { pointsUsed: points } });
+      .findOneAndUpdate(
+        { _id: reservation._id, pointsUsed: { $exists: false } },
+        { $set: { pointsUsed: points } },
+        { returnDocument: "after" }
+      );
+
+    if (!won) {
+      // Lost the race: another call already committed points for this reservation.
+      const existing = await db
+        .collection<ReservationDocument>("reservations")
+        .findOne({ _id: reservation._id });
+      reservation.pointsUsed = existing?.pointsUsed ?? 0;
+      return;
+    }
+
+    reservation.pointsUsed = points;
+    try {
+      await getLoyaltyProvider().adjustBalance(reservation.email, -points);
+    } catch (error) {
+      // Roll back the mark so a retry can cleanly recommit instead of silently granting a
+      // discount that was never actually deducted from the customer's balance.
+      await db
+        .collection<ReservationDocument>("reservations")
+        .updateOne({ _id: reservation._id }, { $unset: { pointsUsed: "" } });
+      reservation.pointsUsed = undefined;
+      throw error;
+    }
+    return;
+  }
+
+  // In-memory: this check-then-mark runs as one synchronous turn (no await yet), so a
+  // concurrent call racing through the same `await getDb()` above can only ever observe it
+  // fully applied or not at all once its own turn resumes.
+  if (reservation.pointsUsed !== undefined) return;
+  reservation.pointsUsed = points;
+  try {
+    await getLoyaltyProvider().adjustBalance(reservation.email, -points);
+  } catch (error) {
+    reservation.pointsUsed = undefined;
+    throw error;
   }
 }
 
 /**
  * Awards loyalty points for the card-paid part of a purchase and records them on the
  * reservation (Etap III Karta A). Call only once, on the webhook call that performed the
- * RESERVED -> PURCHASED transition (see PurchaseResult.firstTransition).
+ * RESERVED -> PURCHASED transition (see PurchaseResult.firstTransition) — a redelivered
+ * Stripe event for an already-purchased reservation must never call this again.
+ *
+ * A Voucherify outage here must not fail the webhook: the ticket is already sold by this
+ * point, and the "firstTransition" guard means this never runs again for this reservation,
+ * so throwing would permanently lose the points with no retry ever seeing them credited.
+ * We log and skip the credit instead, matching how the confirmation e-mail is handled.
  */
 export async function awardPurchasePoints(reservation: ReservationDocument): Promise<number> {
   const paidByCard = reservation.amount - (reservation.pointsUsed ?? 0);
   const pointsEarned = pointsEarnedForCardAmount(paidByCard);
 
   if (pointsEarned > 0) {
-    await getLoyaltyProvider().adjustBalance(reservation.email, pointsEarned);
+    try {
+      await getLoyaltyProvider().adjustBalance(reservation.email, pointsEarned);
+    } catch (error) {
+      console.warn("[loyalty] Failed to award purchase points, skipping credit:", error);
+      return 0;
+    }
   }
 
   const db = await getDb();

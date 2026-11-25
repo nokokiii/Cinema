@@ -19,7 +19,9 @@ import {
   getReservationTimeoutMinutes,
   generateTicketCode,
   getEventById,
+  commitReservationPoints,
 } from "@/app/lib/events-service";
+import { getLoyaltyProvider, WELCOME_BONUS_POINTS } from "@/app/lib/loyalty";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -810,5 +812,49 @@ describe("Przejścia stanów przy zakupie", () => {
 
     const taken = await getTakenSeats(VALID_EVENT_ID);
     expect(taken).not.toContain("H2");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ZAGROŻENIE (Etap III): double-spending punktów przy równoległym checkout
+// Ten sam wzorzec co double-booking (B2) / idempotencja zakupu (C1), tylko że
+// zamiast dwóch rezerwacji tego samego miejsca, chodzi o dwa równoległe żądania
+// checkout dla tej samej rezerwacji próbujące odjąć punkty z salda klienta.
+// ---------------------------------------------------------------------------
+describe("ZAGROŻENIE (Etap III): double-spending punktów", () => {
+  beforeEach(() => {
+    resetStore();
+    global._loyaltyMemoryStore = undefined;
+  });
+
+  const findReservation = (id: string) =>
+    global._inMemoryStore!.reservations.find((r) => r._id === id)!;
+
+  it("[points-race] 2 równoległe commitReservationPoints dla tej samej rezerwacji: punkty schodzą tylko raz", async () => {
+    const { reservationId } = await makeReservation({ seatId: "A2", email: "spender@example.com" });
+    const reservation = findReservation(reservationId);
+    await getLoyaltyProvider().getBalance("spender@example.com"); // enroll with 1000 pts
+
+    await Promise.all([
+      commitReservationPoints(reservation, 500),
+      commitReservationPoints(reservation, 500),
+    ]);
+
+    expect(reservation.pointsUsed).toBe(500);
+    const balance = await getLoyaltyProvider().getBalance("spender@example.com");
+    expect(balance).toBe(WELCOME_BONUS_POINTS - 500); // not -1000
+  });
+
+  it("[points-race] drugie wywołanie po zatwierdzeniu jest no-opem (nie odejmuje ponownie)", async () => {
+    const { reservationId } = await makeReservation({ seatId: "A3", email: "spender2@example.com" });
+    const reservation = findReservation(reservationId);
+    await getLoyaltyProvider().getBalance("spender2@example.com");
+
+    await commitReservationPoints(reservation, 400);
+    await commitReservationPoints(reservation, 400); // retry, e.g. po anulowanej sesji Stripe
+
+    expect(reservation.pointsUsed).toBe(400);
+    const balance = await getLoyaltyProvider().getBalance("spender2@example.com");
+    expect(balance).toBe(WELCOME_BONUS_POINTS - 400);
   });
 });

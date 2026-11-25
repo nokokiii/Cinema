@@ -139,44 +139,64 @@ function getMemoryLoyaltyStore(): Map<string, number> {
   return global._loyaltyMemoryStore;
 }
 
+function isDuplicateKeyError(error: unknown): boolean {
+  return (error as { code?: number } | null)?.code === 11000;
+}
+
+/**
+ * Ensures the account row exists (seeded with the welcome bonus) and returns its balance.
+ * Two concurrent first-touches for the same new e-mail race on insertOne; the loser's
+ * duplicate-key error is expected and just means the winner already created the row.
+ */
+async function ensureLoyaltyAccount(db: Db | null, email: string): Promise<number> {
+  if (db) {
+    const collection = db.collection<LoyaltyAccountDocument>("loyaltyAccounts");
+    const existing = await collection.findOne({ _id: email });
+    if (existing) return existing.balance;
+    try {
+      await collection.insertOne({ _id: email, balance: WELCOME_BONUS_POINTS });
+      return WELCOME_BONUS_POINTS;
+    } catch (error) {
+      if (!isDuplicateKeyError(error)) throw error;
+      const raced = await collection.findOne({ _id: email });
+      return raced?.balance ?? WELCOME_BONUS_POINTS;
+    }
+  }
+
+  const store = getMemoryLoyaltyStore();
+  if (!store.has(email)) store.set(email, WELCOME_BONUS_POINTS);
+  return store.get(email)!;
+}
+
 class FallbackLoyaltyProvider implements LoyaltyProvider {
-  private async withDb(fn: (db: Db) => Promise<number>, memoryFn: () => number): Promise<number> {
-    const db = await getDb();
-    return db ? fn(db) : memoryFn();
-  }
-
   async getBalance(email: string): Promise<number> {
-    return this.withDb(
-      async (db) => {
-        const collection = db.collection<LoyaltyAccountDocument>("loyaltyAccounts");
-        const existing = await collection.findOne({ _id: email });
-        if (existing) return existing.balance;
-        await collection.insertOne({ _id: email, balance: WELCOME_BONUS_POINTS });
-        return WELCOME_BONUS_POINTS;
-      },
-      () => {
-        const store = getMemoryLoyaltyStore();
-        if (!store.has(email)) store.set(email, WELCOME_BONUS_POINTS);
-        return store.get(email)!;
-      }
-    );
+    const db = await getDb();
+    return ensureLoyaltyAccount(db, email);
   }
 
+  /**
+   * Applies the delta with a single atomic increment (Mongo's $inc, or a same-tick
+   * read-then-write for the in-memory store) instead of read-then-write across two separate
+   * awaits — two concurrent adjustments for the same customer (e.g. spending points on one
+   * reservation while earning them on another) would otherwise silently lose one update.
+   */
   async adjustBalance(email: string, points: number): Promise<number> {
-    const current = await this.getBalance(email);
-    const next = current + points;
-    return this.withDb(
-      async (db) => {
-        await db
-          .collection<LoyaltyAccountDocument>("loyaltyAccounts")
-          .updateOne({ _id: email }, { $set: { balance: next } }, { upsert: true });
-        return next;
-      },
-      () => {
-        getMemoryLoyaltyStore().set(email, next);
-        return next;
-      }
-    );
+    const db = await getDb();
+    await ensureLoyaltyAccount(db, email);
+
+    if (db) {
+      const updated = await db
+        .collection<LoyaltyAccountDocument>("loyaltyAccounts")
+        .findOneAndUpdate({ _id: email }, { $inc: { balance: points } }, { returnDocument: "after" });
+      return updated?.balance ?? 0;
+    }
+
+    // No await between the read and the write below: this runs as one synchronous turn,
+    // so a concurrent call can only ever see it fully applied or not at all.
+    const store = getMemoryLoyaltyStore();
+    const next = (store.get(email) ?? WELCOME_BONUS_POINTS) + points;
+    store.set(email, next);
+    return next;
   }
 }
 
