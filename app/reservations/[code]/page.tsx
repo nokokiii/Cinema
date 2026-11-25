@@ -148,6 +148,34 @@ async function TicketContent({ code }: { code: string }) {
           </div>
         </div>
 
+        {reservation.status === "PURCHASED" && (
+          <div className="bg-slate-950/70 p-4 rounded-2xl border border-slate-800/80 space-y-1.5 text-sm">
+            <div className="text-xs text-slate-400 uppercase tracking-wider mb-1">
+              Podsumowanie zakupu
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Zapłacono kartą:</span>
+              <span className="font-semibold text-white">
+                {((reservation.amount - (reservation.pointsUsed ?? 0)) / 100).toFixed(2)} zł
+              </span>
+            </div>
+            {Boolean(reservation.pointsUsed) && (
+              <div className="flex justify-between">
+                <span className="text-slate-400">Zapłacono punktami:</span>
+                <span className="font-semibold text-white">{reservation.pointsUsed} pkt</span>
+              </div>
+            )}
+            {Boolean(reservation.pointsEarned) && (
+              <div className="flex justify-between">
+                <span className="text-slate-400">Zebrane punkty:</span>
+                <span className="font-semibold text-amber-400">
+                  +{reservation.pointsEarned} pkt
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
         {reservation.status !== "PURCHASED" && (
           <PaymentActionsClient reservationId={reservation._id} />
         )}

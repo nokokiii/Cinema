@@ -42,8 +42,40 @@ export default function ReserveFormClient({
   const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
   const [isExpired, setIsExpired] = useState(false);
 
+  // Etap III: loyalty points (Karta A balance lookup, Karta B spend-at-checkout)
+  const [fetchedBalance, setFetchedBalance] = useState<number | null>(null);
+  const [pointsToUseRaw, setPointsToUseRaw] = useState(0);
+  const [pointsLocked, setPointsLocked] = useState(false);
+
   const isMultiSeat = seatIds.length > 1;
   const unitPrice = event.priceMinor;
+  const totalPrice = reservation?.amount ?? (unitPrice !== undefined ? unitPrice * seatIds.length : 0);
+  const maxRedeemablePoints = Math.floor(totalPrice / 2);
+  const emailLooksValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const pointsBalance = emailLooksValid || pointsLocked ? fetchedBalance : null;
+  const usablePoints = Math.max(0, Math.min(pointsBalance ?? 0, maxRedeemablePoints));
+  const pointsToUse = pointsLocked ? pointsToUseRaw : Math.min(pointsToUseRaw, usablePoints);
+  const amountDue = totalPrice - pointsToUse;
+
+  // Look up the customer's points balance once they've typed a plausible e-mail (Karta A).
+  useEffect(() => {
+    if (pointsLocked || !emailLooksValid) return;
+    const trimmed = email.trim();
+    let cancelled = false;
+    const timeout = setTimeout(() => {
+      fetch(`/api/loyalty?email=${encodeURIComponent(trimmed)}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (!cancelled && data) setFetchedBalance(data.points);
+        })
+        .catch(() => {});
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [email, pointsLocked]);
 
   // Resume an in-flight reservation after returning from a cancelled Stripe checkout,
   // instead of making the customer fill in the form again (Etap II Karta C).
@@ -64,6 +96,10 @@ export default function ReserveFormClient({
           });
           setCustomerName(data.reservation?.customerName ?? "");
           setEmail(data.reservation?.email ?? "");
+          if (data.pointsUsed !== undefined) {
+            setPointsToUseRaw(data.pointsUsed);
+            setPointsLocked(true);
+          }
         } else if (data.status === "paid") {
           startTransition(() => {
             router.push(`/reservations/${encodeURIComponent(initialReservationId)}`);
@@ -157,10 +193,15 @@ export default function ReserveFormClient({
     try {
       const res = await fetch(
         `/api/reservations/${encodeURIComponent(reservation.reservationId)}/checkout`,
-        { method: "POST" }
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ points: pointsToUse }),
+        }
       );
 
       const data = await res.json();
+      if (res.ok) setPointsLocked(true);
 
       if (!res.ok) {
         if (res.status === 409 && data.code) {
@@ -321,6 +362,34 @@ export default function ReserveFormClient({
             </div>
           </div>
 
+          {/* Etap III Karta B: use points in cart */}
+          {pointsBalance !== null && usablePoints > 0 && (
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <label htmlFor="pointsToUse" className="text-slate-400">
+                  Użyj punktów (masz {pointsBalance}, max {usablePoints})
+                </label>
+                <span className="text-amber-400 font-mono">{pointsToUse} pkt</span>
+              </div>
+              <input
+                id="pointsToUse"
+                type="range"
+                min={0}
+                max={usablePoints}
+                step={1}
+                value={pointsToUse}
+                disabled={pointsLocked}
+                onChange={(e) => setPointsToUseRaw(Number(e.target.value))}
+                className="w-full accent-amber-500 disabled:opacity-50"
+              />
+            </div>
+          )}
+          {pointsLocked && pointsToUse > 0 && (
+            <div className="text-xs text-slate-400 text-center">
+              {pointsToUse} pkt już odjęte od salda dla tej rezerwacji.
+            </div>
+          )}
+
           <button
             type="button"
             onClick={handlePurchase}
@@ -329,7 +398,7 @@ export default function ReserveFormClient({
           >
             {isLoading
               ? "Przekierowanie do Stripe..."
-              : `Zapłać ${formatPln(reservation.amount)}`}
+              : `Zapłać ${formatPln(amountDue)}`}
           </button>
         </div>
       ) : (
@@ -369,6 +438,11 @@ export default function ReserveFormClient({
               onChange={(e) => setEmail(e.target.value)}
               className="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all"
             />
+            {pointsBalance !== null && (
+              <p className="text-xs text-amber-400 mt-1">
+                Masz {pointsBalance} punktów ({formatPln(pointsBalance)})
+              </p>
+            )}
           </div>
 
           <p className="text-xs text-slate-400">
