@@ -38,7 +38,7 @@ Install Stripe CLI (once), then:
 
 ```bash
 stripe login
-stripe listen --forward-to localhost:3000/api/stripe/webhook --events checkout.session.completed,payment_intent.succeeded,payment_intent.payment_failed
+stripe listen --forward-to localhost:3000/api/webhooks/stripe --events checkout.session.completed,payment_intent.succeeded,payment_intent.payment_failed
 ```
 
 Copy the printed `whsec_...` and set it as `STRIPE_WEBHOOK_SECRET` in `.env.local`.
@@ -54,7 +54,7 @@ stripe trigger checkout.session.completed
 
 1. Choose event and seat in the app.
 2. Create reservation.
-3. Click **Przejdź do płatności Stripe**.
+3. Click **Zapłać X zł**.
 4. Pay with Stripe test card:
    - `4242 4242 4242 4242`
    - any future expiry
@@ -74,7 +74,7 @@ In Vercel project env vars set:
 In Stripe Dashboard (Test mode), create webhook endpoint:
 
 ```text
-https://your-app.vercel.app/api/stripe/webhook
+https://your-app.vercel.app/api/webhooks/stripe
 ```
 
 Use `checkout.session.completed` at minimum.
@@ -82,6 +82,7 @@ Copy that endpoint's `whsec_...` into Vercel `STRIPE_WEBHOOK_SECRET`, then redep
 
 ## 6) API endpoints used for payments
 
-- `POST /api/stripe/checkout-session`
-- `POST /api/stripe/webhook`
+- `POST /api/reservations/:id/checkout`
+- `POST /api/webhooks/stripe`
+- `GET /api/reservations/:id` — `{ status, amount, expiresAt, code? }`
 

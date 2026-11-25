@@ -11,9 +11,11 @@ export const instant = false;
 async function ReserveContent({
   eventId,
   seats,
+  reservationId,
 }: {
   eventId?: string;
   seats?: string;
+  reservationId?: string;
 }) {
   await connection();
 
@@ -57,15 +59,21 @@ async function ReserveContent({
     );
   }
 
-  return <ReserveFormClient event={event} seatIds={seatIds} />;
+  return (
+    <ReserveFormClient
+      event={event}
+      seatIds={seatIds}
+      initialReservationId={reservationId}
+    />
+  );
 }
 
 export default async function ReservePage({
   searchParams,
 }: {
-  searchParams: Promise<{ eventId?: string; seats?: string }>;
+  searchParams: Promise<{ eventId?: string; seats?: string; reservationId?: string }>;
 }) {
-  const { eventId, seats } = await searchParams;
+  const { eventId, seats, reservationId } = await searchParams;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -96,7 +104,7 @@ export default async function ReservePage({
             </div>
           }
         >
-          <ReserveContent eventId={eventId} seats={seats} />
+          <ReserveContent eventId={eventId} seats={seats} reservationId={reservationId} />
         </Suspense>
       </main>
     </div>

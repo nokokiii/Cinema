@@ -1,3 +1,4 @@
+// POST /api/webhooks/stripe - Receives Stripe events, in particular checkout.session.completed
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { purchaseReservation } from "@/app/lib/events-service";
