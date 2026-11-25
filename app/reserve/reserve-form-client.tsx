@@ -9,11 +9,17 @@ import { EventDocument } from "@/app/lib/types";
 interface ReserveFormClientProps {
   event: EventDocument;
   seatIds: string[];
+  initialReservationId?: string;
+}
+
+function formatPln(amountMinor: number): string {
+  return `${(amountMinor / 100).toFixed(2).replace(/\.00$/, "")} zł`;
 }
 
 export default function ReserveFormClient({
   event,
   seatIds,
+  initialReservationId,
 }: ReserveFormClientProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -22,12 +28,14 @@ export default function ReserveFormClient({
   const [email, setEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isResuming, setIsResuming] = useState(Boolean(initialReservationId));
 
   // Reservation state after POST /api/reservations
   const [reservation, setReservation] = useState<{
     reservationId: string;
     expiresAt: string;
     code: string;
+    amount: number;
   } | null>(null);
 
   // Countdown timer state in seconds
@@ -35,6 +43,42 @@ export default function ReserveFormClient({
   const [isExpired, setIsExpired] = useState(false);
 
   const isMultiSeat = seatIds.length > 1;
+  const unitPrice = event.priceMinor;
+
+  // Resume an in-flight reservation after returning from a cancelled Stripe checkout,
+  // instead of making the customer fill in the form again (Etap II Karta C).
+  useEffect(() => {
+    if (!initialReservationId) return;
+
+    let cancelled = false;
+    fetch(`/api/reservations/${initialReservationId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (data.status === "held") {
+          setReservation({
+            reservationId: initialReservationId,
+            expiresAt: data.expiresAt,
+            code: data.reservation?.code ?? "",
+            amount: data.amount,
+          });
+          setCustomerName(data.reservation?.customerName ?? "");
+          setEmail(data.reservation?.email ?? "");
+        } else if (data.status === "paid") {
+          startTransition(() => {
+            router.push(`/reservations/${encodeURIComponent(initialReservationId)}`);
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsResuming(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialReservationId]);
 
   // Live countdown timer effect
   useEffect(() => {
@@ -93,6 +137,7 @@ export default function ReserveFormClient({
         reservationId: data.reservationId,
         expiresAt: data.expiresAt,
         code: data.code,
+        amount: data.amount,
       });
       setIsLoading(false);
     } catch (err) {
@@ -110,11 +155,10 @@ export default function ReserveFormClient({
     setErrorMessage(null);
 
     try {
-      const res = await fetch("/api/stripe/checkout-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reservationId: reservation.reservationId }),
-      });
+      const res = await fetch(
+        `/api/reservations/${encodeURIComponent(reservation.reservationId)}/checkout`,
+        { method: "POST" }
+      );
 
       const data = await res.json();
 
@@ -137,13 +181,13 @@ export default function ReserveFormClient({
         return;
       }
 
-      if (!data.checkoutUrl) {
+      if (!data.url) {
         setErrorMessage("Nie udało się uruchomić płatności Stripe.");
         setIsLoading(false);
         return;
       }
 
-      window.location.assign(data.checkoutUrl);
+      window.location.assign(data.url);
     } catch (err) {
       console.error(err);
       setErrorMessage("Błąd podczas finalizacji zakupu. Spróbuj ponownie.");
@@ -190,7 +234,23 @@ export default function ReserveFormClient({
             {seatIds.join(", ")}
           </span>
         </div>
+        {unitPrice !== undefined && (
+          <div className="mt-2 flex items-center justify-between text-sm">
+            <span className="text-slate-400">
+              Cena{isMultiSeat ? ` (${formatPln(unitPrice)} / miejsce)` : ""}:
+            </span>
+            <span className="font-bold text-white">
+              {formatPln(reservation?.amount ?? unitPrice * seatIds.length)}
+            </span>
+          </div>
+        )}
       </div>
+
+      {isResuming && (
+        <div className="text-center py-10 text-slate-400 text-sm">
+          Wczytywanie rezerwacji...
+        </div>
+      )}
 
       {/* Error Message */}
       {errorMessage && (
@@ -200,7 +260,7 @@ export default function ReserveFormClient({
       )}
 
       {/* State 3: EXPIRED */}
-      {isExpired ? (
+      {isResuming ? null : isExpired ? (
         <div className="text-center py-6">
           <div className="text-5xl mb-4">⌛</div>
           <h2 className="text-xl font-bold text-rose-400 mb-2">
@@ -269,7 +329,7 @@ export default function ReserveFormClient({
           >
             {isLoading
               ? "Przekierowanie do Stripe..."
-              : "Przejdź do płatności Stripe"}
+              : `Zapłać ${formatPln(reservation.amount)}`}
           </button>
         </div>
       ) : (

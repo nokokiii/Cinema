@@ -4,6 +4,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { getReservationDetails } from "@/app/lib/events-service";
 import { isValidReservationIdOrCode } from "@/app/lib/validation";
+import PaymentActionsClient from "./payment-actions-client";
 
 export const instant = false;
 
@@ -130,14 +131,26 @@ async function TicketContent({ code }: { code: string }) {
         </div>
 
         <div className="border-t border-slate-800 pt-4 flex flex-col items-center justify-center text-center">
-          <div className="text-xs text-slate-400 uppercase tracking-widest mb-1">Kod Biletu</div>
-          <div className="text-2xl font-extrabold font-mono text-amber-400 tracking-wider bg-slate-950 px-4 py-2 rounded-xl border border-amber-500/30">
-            {reservation.code}
-          </div>
+          {reservation.status === "PURCHASED" ? (
+            <>
+              <div className="text-xs text-slate-400 uppercase tracking-widest mb-1">Kod Biletu</div>
+              <div className="text-2xl font-extrabold font-mono text-amber-400 tracking-wider bg-slate-950 px-4 py-2 rounded-xl border border-amber-500/30">
+                {reservation.code}
+              </div>
+            </>
+          ) : (
+            <div className="text-sm text-amber-300">
+              Płatność w toku lub przerwana — dokończ zakup, zanim rezerwacja wygaśnie.
+            </div>
+          )}
           <div className="text-xs text-slate-500 mt-2">
             Widz: {reservation.customerName} &bull; {reservation.email}
           </div>
         </div>
+
+        {reservation.status !== "PURCHASED" && (
+          <PaymentActionsClient reservationId={reservation._id} />
+        )}
 
         <div className="pt-2 flex flex-col sm:flex-row gap-3">
           <Link
