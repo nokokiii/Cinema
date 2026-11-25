@@ -1,0 +1,115 @@
+// POST /api/reservations/:id/checkout - Creates (or reuses) a Stripe Checkout Session
+import { NextResponse } from "next/server";
+import {
+  getReservationDetails,
+  setReservationStripeSession,
+} from "@/app/lib/events-service";
+import { getStripeConfig, stripe } from "@/app/lib/stripe";
+import { enforceRateLimit } from "@/app/lib/rate-limit";
+import { isValidReservationIdOrCode } from "@/app/lib/validation";
+import { apiError } from "@/app/lib/api-errors";
+
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const limited = enforceRateLimit(request, "purchase");
+  if (limited) return limited;
+
+  const { id } = await params;
+  if (!isValidReservationIdOrCode(id)) {
+    return apiError(400, "Invalid reservation id format");
+  }
+
+  if (!stripe) {
+    return NextResponse.json(
+      { error: "Stripe is not configured on the server" },
+      { status: 503 },
+    );
+  }
+
+  const { currency } = getStripeConfig();
+
+  try {
+    const details = await getReservationDetails(id);
+    if (!details) {
+      return apiError(404, "Reservation not found");
+    }
+
+    if (!details.event) {
+      return apiError(404, "Event not found");
+    }
+
+    if (details.reservation.status === "PURCHASED") {
+      return NextResponse.json(
+        { error: "Reservation already purchased", code: details.reservation.code },
+        { status: 409 },
+      );
+    }
+
+    if (details.isExpired) {
+      return apiError(410, "Reservation expired, seat returned to pool");
+    }
+
+    const { reservation, event } = details;
+
+    // Reuse an already-open session instead of creating a second payable one for
+    // the same reservation (two live sessions would let the seat be paid twice).
+    if (reservation.stripeSessionId) {
+      const existingSession = await stripe.checkout.sessions
+        .retrieve(reservation.stripeSessionId)
+        .catch(() => null);
+      if (existingSession && existingSession.status === "open" && existingSession.url) {
+        return NextResponse.json({ url: existingSession.url });
+      }
+    }
+
+    const origin = new URL(request.url).origin;
+    const encodedReservationId = encodeURIComponent(reservation._id);
+    const encodedEventId = encodeURIComponent(reservation.eventId);
+    const encodedSeats = encodeURIComponent(reservation.seatIds.join(","));
+
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      allowed_payment_method_types: ["card"],
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency,
+            unit_amount: reservation.amount,
+            product_data: {
+              name: `${event.title} (${reservation.seatIds.join(", ")})`,
+              description: `${event.hall} • ${new Date(event.startsAt).toLocaleString("pl-PL")}`,
+            },
+          },
+        },
+      ],
+      metadata: {
+        reservationId: reservation._id,
+        reservationCode: reservation.code,
+        eventId: reservation.eventId,
+        seatIds: reservation.seatIds.join(","),
+      },
+      success_url: `${origin}/reservations/${encodedReservationId}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/reserve?eventId=${encodedEventId}&seats=${encodedSeats}&reservationId=${encodedReservationId}&checkout=cancelled`,
+    });
+
+    if (!session.url) {
+      return NextResponse.json(
+        { error: "Stripe checkout URL is missing" },
+        { status: 500 },
+      );
+    }
+
+    await setReservationStripeSession(reservation._id, session.id);
+
+    return NextResponse.json({ url: session.url });
+  } catch (error) {
+    console.error("Failed to create Stripe checkout session:", error);
+    return NextResponse.json(
+      { error: "Failed to create Stripe checkout session" },
+      { status: 500 },
+    );
+  }
+}

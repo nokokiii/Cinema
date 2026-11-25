@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from "crypto";
 import type { Db } from "mongodb";
 import { getDb } from "./mongodb";
 import { MAX_SEATS_PER_RESERVATION } from "./seats";
+import { getStripeConfig } from "./stripe";
 import {
   CreateReservationResponse,
   EventDocument,
@@ -39,6 +40,7 @@ export const INITIAL_EVENTS: EventDocument[] = [
     description: "Epicka podróż przez czasoprzestrzeń w poszukiwaniu nowego domu dla ludzkości.",
     durationMinutes: 169,
     genre: "Sci-Fi / Przygodowy",
+    priceMinor: 3200,
   },
   {
     _id: "seans-2026-11-21-2030",
@@ -49,6 +51,7 @@ export const INITIAL_EVENTS: EventDocument[] = [
     description: "Paul Atryda jednoczy siły z Chani i Fremenami, aby dokonać zemsty na spiskowcach.",
     durationMinutes: 166,
     genre: "Sci-Fi / Akcja",
+    priceMinor: 3200,
   },
   {
     _id: "seans-2026-11-22-1915",
@@ -59,8 +62,17 @@ export const INITIAL_EVENTS: EventDocument[] = [
     description: "Historia amerykańskiego fizyka J. Roberta Oppenheimera i prac nad bombą atomową.",
     durationMinutes: 180,
     genre: "Biograficzny / Dramat",
+    priceMinor: 3200,
   },
 ];
+
+/**
+ * Per-seat price for an event in minor units (grosze), falling back to the
+ * server-wide STRIPE_TICKET_PRICE_MINOR default when the event has none set.
+ */
+export function getEventPriceMinor(event: EventDocument): number {
+  return event.priceMinor ?? getStripeConfig().ticketPriceMinor;
+}
 
 // In-memory store definition for offline testing or when MongoDB Atlas IP is blocked
 interface InMemoryStore {
@@ -84,12 +96,15 @@ function getMemoryStore(): InMemoryStore {
 
 /**
  * Returns reservation timeout in minutes from env (defaults to 15, or 2 for testing).
+ * Accepts fractional minutes (e.g. "0.05" = 3s) so fast integration test runs can use a
+ * short-but-nonzero window instead of a literal 0, which would expire before any request
+ * after the reservation call could ever reach it.
  */
 export function getReservationTimeoutMinutes(): number {
   const envVal = process.env.RESERVATION_TIMEOUT_MINUTES;
-  if (!envVal) return 15;
-  const parsed = parseInt(envVal, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15;
+  if (envVal === undefined || envVal === "") return 15;
+  const parsed = parseFloat(envVal);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 15;
 }
 
 /**
@@ -209,6 +224,7 @@ export async function createReservation({
 
   const now = new Date();
   const expiresAt = new Date(now.getTime() + getReservationTimeoutMinutes() * 60 * 1000);
+  const amount = getEventPriceMinor(event) * requestedSeats.length;
   const candidate: ReservationDocument = {
     _id: randomUUID(),
     eventId,
@@ -219,6 +235,7 @@ export async function createReservation({
     status: "RESERVED",
     createdAt: now,
     expiresAt,
+    amount,
   };
 
   if (db) {
@@ -234,6 +251,7 @@ function toReservationResponse(reservation: ReservationDocument): CreateReservat
     expiresAt: new Date(reservation.expiresAt).toISOString(),
     code: reservation.code,
     seatIds: reservation.seatIds,
+    amount: reservation.amount,
   };
 }
 
@@ -310,6 +328,7 @@ async function createReservationInMongo(
               code: candidate.code,
               status: "RESERVED",
               expiresAt: new Date(candidate.expiresAt),
+              amount: candidate.amount,
             },
           },
           { upsert: true }
@@ -332,6 +351,7 @@ async function createReservationInMongo(
               expiresAt: holder.expiresAt.toISOString(),
               code: holder.code,
               seatIds: holder.seatIds,
+              amount: holder.amount,
             };
           }
         }
@@ -489,4 +509,41 @@ export async function getReservationDetails(idOrCode: string): Promise<{
     event,
     isExpired,
   };
+}
+
+/**
+ * Derives the public `{ status, amount, expiresAt, code? }` shape from a reservation,
+ * per the GET /api/reservations/:id contract. The ticket code is only exposed once paid.
+ */
+export function toReservationStatusFields(
+  reservation: ReservationDocument,
+  isExpired: boolean
+): { status: "held" | "paid" | "expired"; amount: number; expiresAt: string; code?: string } {
+  const status = reservation.status === "PURCHASED" ? "paid" : isExpired ? "expired" : "held";
+  return {
+    status,
+    amount: reservation.amount,
+    expiresAt: new Date(reservation.expiresAt).toISOString(),
+    ...(status === "paid" ? { code: reservation.code } : {}),
+  };
+}
+
+/**
+ * Records the Stripe Checkout Session currently open for a reservation, so a repeat
+ * checkout call can reuse it instead of creating a second payable session.
+ */
+export async function setReservationStripeSession(
+  reservationId: string,
+  stripeSessionId: string
+): Promise<void> {
+  const db = await getDb();
+  if (db) {
+    await db
+      .collection<ReservationDocument>("reservations")
+      .updateOne({ _id: reservationId }, { $set: { stripeSessionId } });
+    return;
+  }
+
+  const reservation = getMemoryStore().reservations.find((r) => r._id === reservationId);
+  if (reservation) reservation.stripeSessionId = stripeSessionId;
 }

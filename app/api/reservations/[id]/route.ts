@@ -1,6 +1,6 @@
 // GET /api/reservations/:id - Retrieves reservation details with event information
 import { NextResponse } from "next/server";
-import { getReservationDetails } from "@/app/lib/events-service";
+import { getReservationDetails, toReservationStatusFields } from "@/app/lib/events-service";
 import { enforceRateLimit } from "@/app/lib/rate-limit";
 import { isValidReservationIdOrCode } from "@/app/lib/validation";
 import { apiError, serviceErrorResponse } from "@/app/lib/api-errors";
@@ -22,7 +22,10 @@ export async function GET(
     if (!details) {
       return apiError(404, "Reservation not found");
     }
-    return NextResponse.json(details);
+    return NextResponse.json({
+      ...toReservationStatusFields(details.reservation, details.isExpired),
+      ...details,
+    });
   } catch (error) {
     return serviceErrorResponse(error, "Failed to fetch reservation");
   }
