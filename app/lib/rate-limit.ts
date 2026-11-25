@@ -11,6 +11,7 @@ export const RATE_LIMITS = {
   createReservation: { limit: 10, windowMs: 60_000 },
   getReservation: { limit: 30, windowMs: 60_000 },
   purchase: { limit: 10, windowMs: 60_000 },
+  loyalty: { limit: 30, windowMs: 60_000 },
 } satisfies Record<string, RateLimitRule>;
 
 export type RateLimitBucket = keyof typeof RATE_LIMITS;

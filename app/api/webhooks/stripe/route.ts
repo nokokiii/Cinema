@@ -1,8 +1,9 @@
 // POST /api/webhooks/stripe - Receives Stripe events, in particular checkout.session.completed
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { purchaseReservation } from "@/app/lib/events-service";
+import { purchaseReservation, awardPurchasePoints, getEventById } from "@/app/lib/events-service";
 import { getStripeConfig, stripe } from "@/app/lib/stripe";
+import { sendPurchaseConfirmationEmail } from "@/app/lib/email";
 
 function isNonRetriableReservationError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -60,7 +61,18 @@ export async function POST(request: Request) {
         );
       } else {
         try {
-          await purchaseReservation(reservationId);
+          const result = await purchaseReservation(reservationId);
+          // Etap III: award loyalty points and send the confirmation email exactly once,
+          // on whichever delivery actually performed the RESERVED -> PURCHASED transition —
+          // a redelivered event for an already-purchased reservation must not repeat these.
+          if (result.firstTransition) {
+            const pointsEarned = await awardPurchasePoints(result.reservation);
+            const event = await getEventById(result.reservation.eventId);
+            await sendPurchaseConfirmationEmail({
+              reservation: { ...result.reservation, pointsEarned },
+              event,
+            });
+          }
         } catch (error) {
           if (isNonRetriableReservationError(error)) {
             console.warn(

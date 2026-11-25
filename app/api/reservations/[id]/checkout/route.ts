@@ -1,10 +1,13 @@
 // POST /api/reservations/:id/checkout - Creates (or reuses) a Stripe Checkout Session
+// Etap III: accepts an optional { points } body to pay part of the price with loyalty points.
 import { NextResponse } from "next/server";
 import {
   getReservationDetails,
   setReservationStripeSession,
+  commitReservationPoints,
 } from "@/app/lib/events-service";
 import { getStripeConfig, stripe } from "@/app/lib/stripe";
+import { getLoyaltyProvider, maxRedeemablePoints } from "@/app/lib/loyalty";
 import { enforceRateLimit } from "@/app/lib/rate-limit";
 import { isValidReservationIdOrCode } from "@/app/lib/validation";
 import { apiError } from "@/app/lib/api-errors";
@@ -64,6 +67,35 @@ export async function POST(
       }
     }
 
+    // Points are only ever processed once per reservation, on whichever call first commits
+    // them; a retry (e.g. after a cancelled Stripe session) reuses the committed amount.
+    if (reservation.pointsUsed === undefined) {
+      const body = await request.json().catch(() => ({}));
+      const requestedPoints = (body as { points?: unknown })?.points;
+
+      if (requestedPoints !== undefined) {
+        if (!Number.isInteger(requestedPoints) || (requestedPoints as number) < 0) {
+          return apiError(400, "points must be a non-negative integer");
+        }
+        const points = requestedPoints as number;
+
+        if (points > 0) {
+          const maxPoints = maxRedeemablePoints(reservation.amount);
+          if (points > maxPoints) {
+            return apiError(400, `points cannot exceed half the ticket price (max ${maxPoints})`);
+          }
+
+          const balance = await getLoyaltyProvider().getBalance(reservation.email);
+          if (points > balance) {
+            return apiError(400, "Not enough loyalty points");
+          }
+
+          await commitReservationPoints(reservation, points);
+        }
+      }
+    }
+
+    const amountDue = reservation.amount - (reservation.pointsUsed ?? 0);
     const origin = new URL(request.url).origin;
     const encodedReservationId = encodeURIComponent(reservation._id);
     const encodedEventId = encodeURIComponent(reservation.eventId);
@@ -77,7 +109,7 @@ export async function POST(
           quantity: 1,
           price_data: {
             currency,
-            unit_amount: reservation.amount,
+            unit_amount: amountDue,
             product_data: {
               name: `${event.title} (${reservation.seatIds.join(", ")})`,
               description: `${event.hall} • ${new Date(event.startsAt).toLocaleString("pl-PL")}`,
