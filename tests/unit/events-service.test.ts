@@ -490,6 +490,10 @@ describe("ZAGROŻENIE 4: Idempotencja zakupu", () => {
 
     expect(purchase1.code).toBe(expectedCode);
     expect(purchase2.code).toBe(expectedCode);
+
+    // Dokładnie jedno z dwóch wywołań faktycznie wykonało przejście stanu — na tym opiera
+    // się jednorazowe naliczenie punktów i wysyłka maila w webhooku (Etap III).
+    expect([purchase1.firstTransition, purchase2.firstTransition].filter(Boolean)).toHaveLength(1);
   });
 
   // -------------------------------------------------------------------------
@@ -502,6 +506,8 @@ describe("ZAGROŻENIE 4: Idempotencja zakupu", () => {
     const second = await purchaseReservation(reservationId);
 
     expect(first.code).toEqual(second.code);
+    expect(first.firstTransition).toBe(true);
+    expect(second.firstTransition).toBe(false);
   });
 
   // -------------------------------------------------------------------------
