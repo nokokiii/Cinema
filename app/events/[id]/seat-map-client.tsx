@@ -7,7 +7,6 @@ import { MAX_SEATS_PER_RESERVATION } from "@/app/lib/seats";
 
 interface SeatMapClientProps {
   eventId: string;
-  hallName?: string;
   allSeats: string[];
   initialTakenSeats: string[];
 }
@@ -20,15 +19,12 @@ export default function SeatMapClient({
   const router = useRouter();
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
 
-  // Group seats by row (letter prefix)
   const rows = ["A", "B", "C", "D", "E", "F", "G", "H"];
 
-  // Helper to parse human-readable seat representation
-  const parseSeat = (seatId: string) => {
-    const row = seatId.charAt(0);
-    const number = seatId.slice(1);
-    return { row, number };
-  };
+  const parseSeat = (seatId: string) => ({
+    row: seatId.charAt(0),
+    number: seatId.slice(1),
+  });
 
   const handleSeatClick = (seatId: string) => {
     if (initialTakenSeats.includes(seatId)) return;
@@ -50,48 +46,37 @@ export default function SeatMapClient({
 
   return (
     <div className="w-full flex flex-col items-center">
-      {/* Legend */}
-      <div className="flex flex-wrap items-center justify-center gap-6 mb-8 text-sm">
+      <div className="flex items-center justify-center gap-6 mb-8 text-xs text-muted">
         <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-slate-700 border border-slate-600"></div>
-          <span className="text-slate-300">Wolne</span>
+          <div className="w-4 h-4 rounded bg-surface border border-border" />
+          Wolne
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-amber-400 border border-amber-300"></div>
-          <span className="text-slate-300">Wybrane</span>
+          <div className="w-4 h-4 rounded bg-accent" />
+          Wybrane
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-slate-800/80 border border-slate-800 text-slate-600 flex items-center justify-center text-xs">
-            ✕
-          </div>
-          <span className="text-slate-500">Zajęte</span>
+          <div className="w-4 h-4 rounded bg-surface/40 border border-border" />
+          Zajęte
         </div>
       </div>
 
-      {/* Cinema Screen Simulation */}
-      <div className="w-full max-w-2xl mb-12 flex flex-col items-center">
-        <div className="w-full h-3 bg-gradient-to-b from-amber-400/60 to-transparent rounded-t-full shadow-[0_-8px_25px_rgba(251,191,36,0.35)]"></div>
-        <div className="text-xs uppercase tracking-[0.3em] text-slate-400 mt-2 font-semibold">
+      <div className="w-full max-w-xl mb-10">
+        <div className="h-1 bg-accent/30 rounded-full" />
+        <div className="text-center text-xs uppercase tracking-[0.3em] text-muted mt-2">
           Ekran
         </div>
       </div>
 
-      {/* Seat Grid */}
-      <div className="bg-slate-900/90 border border-slate-800 p-6 sm:p-8 rounded-3xl shadow-2xl overflow-x-auto max-w-full">
-        <div className="min-w-[480px] space-y-3">
+      <div className="bg-surface border border-border p-5 sm:p-7 rounded-2xl overflow-x-auto max-w-full">
+        <div className="min-w-[460px] space-y-2.5">
           {rows.map((rowLetter) => {
-            // Find seats for this row, e.g. A1..A10
             const rowSeats = allSeats.filter((s) => s.startsWith(rowLetter));
 
             return (
-              <div key={rowLetter} className="flex items-center justify-center gap-2 sm:gap-3">
-                {/* Row Label */}
-                <div className="w-6 text-center font-bold text-sm text-slate-400">
-                  {rowLetter}
-                </div>
-
-                {/* Seats in row */}
-                <div className="flex items-center gap-2 sm:gap-2.5">
+              <div key={rowLetter} className="flex items-center justify-center gap-2.5">
+                <div className="w-5 text-center text-xs text-muted">{rowLetter}</div>
+                <div className="flex items-center gap-2">
                   {rowSeats.map((seatId) => {
                     const isTaken = initialTakenSeats.includes(seatId);
                     const isSelected = selectedSeats.includes(seatId);
@@ -104,12 +89,12 @@ export default function SeatMapClient({
                         onClick={() => handleSeatClick(seatId)}
                         disabled={isTaken}
                         aria-label={`Rząd ${rowLetter}, Miejsce ${number}${isTaken ? " (Zajęte)" : ""}`}
-                        className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center text-xs font-semibold transition-all duration-150 ${
+                        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-md flex items-center justify-center text-[11px] font-medium transition-colors ${
                           isTaken
-                            ? "bg-slate-800/80 text-slate-600 border border-slate-800 cursor-not-allowed opacity-60"
+                            ? "bg-surface/40 text-muted/50 cursor-not-allowed"
                             : isSelected
-                            ? "bg-amber-400 text-slate-950 font-extrabold border-2 border-white scale-110 shadow-lg shadow-amber-400/40"
-                            : "bg-slate-800 text-slate-200 border border-slate-700 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-400 active:scale-95 cursor-pointer"
+                            ? "bg-accent text-accent-foreground font-bold"
+                            : "bg-background text-muted border border-border hover:border-accent/60 hover:text-foreground cursor-pointer"
                         }`}
                       >
                         {number}
@@ -117,45 +102,36 @@ export default function SeatMapClient({
                     );
                   })}
                 </div>
-
-                {/* Right Row Label */}
-                <div className="w-6 text-center font-bold text-sm text-slate-400">
-                  {rowLetter}
-                </div>
+                <div className="w-5 text-center text-xs text-muted">{rowLetter}</div>
               </div>
             );
           })}
         </div>
       </div>
 
-      {/* Selected Seat Action Bar */}
-      <div className="w-full max-w-md mt-8 p-4 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div className="w-full max-w-md mt-8 p-4 bg-surface border border-border rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
         {selectedSeats.length > 0 ? (
           <>
             <div className="text-center sm:text-left">
-              <div className="text-xs text-slate-400 font-medium">
-                Wybrane fotele ({selectedSeats.length}/{MAX_SEATS_PER_RESERVATION})
+              <div className="text-xs text-muted">
+                Wybrane ({selectedSeats.length}/{MAX_SEATS_PER_RESERVATION})
               </div>
-              <div className="text-lg font-bold text-white font-mono">
-                {selectedSeats.join(", ")}
-              </div>
+              <div className="font-mono font-medium">{selectedSeats.join(", ")}</div>
               {limitReached && (
-                <div className="text-xs text-amber-400 mt-1">
-                  Osiągnięto limit miejsc w jednej rezerwacji.
-                </div>
+                <div className="text-xs text-accent mt-1">Osiągnięto limit miejsc.</div>
               )}
             </div>
             <button
               type="button"
               onClick={handleProceedToReservation}
-              className="w-full sm:w-auto px-5 py-2.5 rounded-xl font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition-colors shadow-lg shadow-amber-500/20 active:scale-95 cursor-pointer"
+              className="w-full sm:w-auto px-5 py-2.5 rounded-xl font-medium bg-accent hover:bg-accent/90 text-accent-foreground transition-colors cursor-pointer"
             >
-              Przejdź do rezerwacji &rarr;
+              Przejdź do rezerwacji
             </button>
           </>
         ) : (
-          <div className="w-full text-center text-slate-400 text-sm py-2">
-            Kliknij wolne fotele na mapie (maks. {MAX_SEATS_PER_RESERVATION}), aby przejść do rezerwacji.
+          <div className="w-full text-center text-muted text-sm py-1">
+            Kliknij wolne miejsca (maks. {MAX_SEATS_PER_RESERVATION}).
           </div>
         )}
       </div>

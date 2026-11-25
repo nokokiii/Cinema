@@ -255,32 +255,28 @@ export default function ReserveFormClient({
   });
 
   return (
-    <div className="w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl">
+    <div className="w-full bg-surface border border-border rounded-2xl p-6 sm:p-8">
       {/* Screening & Seat Details Header */}
-      <div className="border-b border-slate-800 pb-6 mb-6">
-        <div className="flex items-center justify-between gap-2 mb-2">
-          <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-400/10 text-amber-300 border border-amber-400/20">
-            {event.hall}
-          </span>
-          <span className="text-xs text-slate-400">
+      <div className="border-b border-border pb-6 mb-6">
+        <div className="flex items-center justify-between gap-2 mb-2 text-xs text-muted">
+          <span>{event.hall}</span>
+          <span>
             {formattedDate}, godz. {formattedTime}
           </span>
         </div>
-        <h1 className="text-2xl font-bold text-white mb-2">{event.title}</h1>
-        <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
-          <span className="text-sm text-slate-400">
+        <h1 className="text-xl font-semibold mb-3">{event.title}</h1>
+        <div className="p-3 bg-background rounded-xl border border-border flex items-center justify-between">
+          <span className="text-sm text-muted">
             {isMultiSeat ? `Wybrane miejsca (${seatIds.length}):` : "Wybrane miejsce:"}
           </span>
-          <span className="text-base font-bold text-amber-400 font-mono">
-            {seatIds.join(", ")}
-          </span>
+          <span className="font-mono font-medium text-accent">{seatIds.join(", ")}</span>
         </div>
         {unitPrice !== undefined && (
           <div className="mt-2 flex items-center justify-between text-sm">
-            <span className="text-slate-400">
+            <span className="text-muted">
               Cena{isMultiSeat ? ` (${formatPln(unitPrice)} / miejsce)` : ""}:
             </span>
-            <span className="font-bold text-white">
+            <span className="font-medium">
               {formatPln(reservation?.amount ?? unitPrice * seatIds.length)}
             </span>
           </div>
@@ -288,14 +284,12 @@ export default function ReserveFormClient({
       </div>
 
       {isResuming && (
-        <div className="text-center py-10 text-slate-400 text-sm">
-          Wczytywanie rezerwacji...
-        </div>
+        <div className="text-center py-10 text-muted text-sm">Wczytywanie rezerwacji...</div>
       )}
 
       {/* Error Message */}
       {errorMessage && (
-        <div className="mb-6 p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-sm">
+        <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
           {errorMessage}
         </div>
       )}
@@ -303,24 +297,23 @@ export default function ReserveFormClient({
       {/* State 3: EXPIRED */}
       {isResuming ? null : isExpired ? (
         <div className="text-center py-6">
-          <div className="text-5xl mb-4">⌛</div>
-          <h2 className="text-xl font-bold text-rose-400 mb-2">
+          <h2 className="text-lg font-semibold mb-2">
             Rezerwacja wygasła, fotel wrócił do puli
           </h2>
-          <p className="text-slate-400 text-sm mb-6">
+          <p className="text-muted text-sm mb-6">
             Upłynął czas na sfinalizowanie zakupu. Miejsce stało się ponownie
             dostępne dla innych widzów.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <Link
               href={`/events/${event._id}`}
-              className="px-5 py-2.5 rounded-xl font-semibold bg-slate-800 hover:bg-slate-700 text-white transition-colors"
+              className="px-5 py-2.5 rounded-xl font-medium bg-background border border-border hover:border-accent/50 transition-colors"
             >
               Wróć do mapy sali
             </Link>
             <Link
               href="/"
-              className="px-5 py-2.5 rounded-xl font-semibold bg-amber-500 hover:bg-amber-400 text-slate-950 transition-colors"
+              className="px-5 py-2.5 rounded-xl font-medium bg-accent hover:bg-accent/90 text-accent-foreground transition-colors"
             >
               Zobacz repertuar
             </Link>
@@ -328,48 +321,42 @@ export default function ReserveFormClient({
         </div>
       ) : reservation ? (
         /* State 2: HOLDING with countdown timer and "Kupuję bilet" button */
-        <div className="space-y-6">
-          <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-center">
-            <div className="text-xs font-semibold uppercase tracking-wider text-amber-300 mb-1">
+        <div className="space-y-5">
+          <div className="p-5 rounded-xl bg-accent/10 border border-accent/20 text-center">
+            <div className="text-xs font-medium uppercase tracking-wider text-accent mb-1">
               Czas na dokończenie zakupu
             </div>
-            <div className="text-3xl font-extrabold text-amber-400 font-mono">
-              Trzymamy Twój fotel jeszcze{" "}
-              {secondsRemaining !== null
-                ? formatTime(secondsRemaining)
-                : "--:--"}
+            <div className="text-2xl font-semibold font-mono">
+              {secondsRemaining !== null ? formatTime(secondsRemaining) : "--:--"}
             </div>
-            <p className="text-xs text-slate-400 mt-2">
-              Po upływie tego czasu rezerwacja przepadnie, a miejsce wróci do
-              ogólnej puli.
+            <p className="text-xs text-muted mt-2">
+              Po upływie tego czasu rezerwacja przepadnie, a miejsce wróci do ogólnej puli.
             </p>
           </div>
 
-          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2 text-sm">
+          <div className="bg-background p-4 rounded-xl border border-border space-y-2 text-sm">
             <div className="flex justify-between">
-              <span className="text-slate-400">Rezerwujący:</span>
-              <span className="font-medium text-white">{customerName}</span>
+              <span className="text-muted">Rezerwujący:</span>
+              <span className="font-medium">{customerName}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-400">E-mail:</span>
-              <span className="font-medium text-white">{email}</span>
+              <span className="text-muted">E-mail:</span>
+              <span className="font-medium">{email}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-400">Kod rezerwacji:</span>
-              <span className="font-mono text-amber-400">
-                {reservation.code}
-              </span>
+              <span className="text-muted">Kod rezerwacji:</span>
+              <span className="font-mono text-accent">{reservation.code}</span>
             </div>
           </div>
 
           {/* Etap III Karta B: use points in cart */}
           {pointsBalance !== null && usablePoints > 0 && (
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+            <div className="bg-background p-4 rounded-xl border border-border space-y-2">
               <div className="flex items-center justify-between text-sm">
-                <label htmlFor="pointsToUse" className="text-slate-400">
+                <label htmlFor="pointsToUse" className="text-muted">
                   Użyj punktów (masz {pointsBalance}, max {usablePoints})
                 </label>
-                <span className="text-amber-400 font-mono">{pointsToUse} pkt</span>
+                <span className="text-accent font-mono">{pointsToUse} pkt</span>
               </div>
               <input
                 id="pointsToUse"
@@ -380,12 +367,12 @@ export default function ReserveFormClient({
                 value={pointsToUse}
                 disabled={pointsLocked}
                 onChange={(e) => setPointsToUseRaw(Number(e.target.value))}
-                className="w-full accent-amber-500 disabled:opacity-50"
+                className="w-full accent-[#f97316] disabled:opacity-50"
               />
             </div>
           )}
           {pointsLocked && pointsToUse > 0 && (
-            <div className="text-xs text-slate-400 text-center">
+            <div className="text-xs text-muted text-center">
               {pointsToUse} pkt już odjęte od salda dla tej rezerwacji.
             </div>
           )}
@@ -394,21 +381,16 @@ export default function ReserveFormClient({
             type="button"
             onClick={handlePurchase}
             disabled={isLoading || isExpired}
-            className="w-full py-3.5 px-6 rounded-xl font-bold text-lg bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 transition-all shadow-xl shadow-amber-500/20 active:scale-[0.98] cursor-pointer"
+            className="w-full py-3.5 px-6 rounded-xl font-semibold bg-accent hover:bg-accent/90 disabled:bg-surface disabled:text-muted text-accent-foreground transition-colors cursor-pointer"
           >
-            {isLoading
-              ? "Przekierowanie do Stripe..."
-              : `Zapłać ${formatPln(amountDue)}`}
+            {isLoading ? "Przekierowanie do Stripe..." : `Zapłać ${formatPln(amountDue)}`}
           </button>
         </div>
       ) : (
         /* State 1: FORM to create reservation */
         <form onSubmit={handleReserve} className="space-y-4">
           <div>
-            <label
-              htmlFor="customerName"
-              className="block text-sm font-medium text-slate-300 mb-1"
-            >
+            <label htmlFor="customerName" className="block text-sm text-muted mb-1">
               Imię i nazwisko
             </label>
             <input
@@ -418,15 +400,12 @@ export default function ReserveFormClient({
               placeholder="np. Jan Kowalski"
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
-              className="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all"
+              className="w-full px-4 py-3 rounded-xl bg-background border border-border placeholder-muted focus:outline-none focus:ring-2 focus:ring-accent transition-all"
             />
           </div>
 
           <div>
-            <label
-              htmlFor="email"
-              className="block text-sm font-medium text-slate-300 mb-1"
-            >
+            <label htmlFor="email" className="block text-sm text-muted mb-1">
               Adres e-mail
             </label>
             <input
@@ -436,16 +415,16 @@ export default function ReserveFormClient({
               placeholder="np. jan.kowalski@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all"
+              className="w-full px-4 py-3 rounded-xl bg-background border border-border placeholder-muted focus:outline-none focus:ring-2 focus:ring-accent transition-all"
             />
             {pointsBalance !== null && (
-              <p className="text-xs text-amber-400 mt-1">
+              <p className="text-xs text-accent mt-1">
                 Masz {pointsBalance} punktów ({formatPln(pointsBalance)})
               </p>
             )}
           </div>
 
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-muted">
             Po kliknięciu przycisku {isMultiSeat ? "miejsca zostaną zarezerwowane" : "miejsce zostanie zarezerwowane"} na
             15 minut. W tym czasie nikt inny nie będzie mógł {isMultiSeat ? "ich" : "go"} wybrać.
           </p>
@@ -453,7 +432,7 @@ export default function ReserveFormClient({
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full py-3.5 px-6 rounded-xl font-bold text-base bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 transition-all shadow-lg shadow-amber-500/20 active:scale-[0.98] cursor-pointer mt-2"
+            className="w-full py-3.5 px-6 rounded-xl font-semibold bg-accent hover:bg-accent/90 disabled:bg-surface disabled:text-muted text-accent-foreground transition-colors cursor-pointer mt-2"
           >
             {isLoading
               ? "Rezerwowanie..."
