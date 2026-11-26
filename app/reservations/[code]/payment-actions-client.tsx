@@ -44,7 +44,7 @@ export default function PaymentActionsClient({ reservationId }: { reservationId:
   return (
     <div className="pt-2 space-y-3">
       {errorMessage && (
-        <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-sm text-center">
+        <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm text-center">
           {errorMessage}
         </div>
       )}
@@ -52,7 +52,7 @@ export default function PaymentActionsClient({ reservationId }: { reservationId:
         type="button"
         onClick={handlePay}
         disabled={isPaying}
-        className="w-full py-3.5 px-6 rounded-xl font-bold text-lg bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 transition-all shadow-xl shadow-amber-500/20 active:scale-[0.98] cursor-pointer"
+        className="w-full py-3.5 px-6 rounded-xl font-semibold bg-accent hover:bg-accent/90 disabled:bg-surface disabled:text-muted text-accent-foreground transition-colors cursor-pointer"
       >
         {isPaying ? "Przekierowanie do Stripe..." : "Zapłać teraz"}
       </button>

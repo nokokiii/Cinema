@@ -23,6 +23,14 @@ export function isValidEventId(value: unknown): value is string {
   );
 }
 
+export function isValidEmail(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= EMAIL_MAX_LENGTH &&
+    EMAIL_PATTERN.test(value)
+  );
+}
+
 /**
  * Accepts a reservation UUID or a ticket code (e.g. TKT-A1-1F2E3D).
  */

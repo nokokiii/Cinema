@@ -18,8 +18,8 @@ export async function POST(
   }
 
   try {
-    const result = await purchaseReservation(id);
-    return NextResponse.json(result, { status: 200 });
+    const { code } = await purchaseReservation(id);
+    return NextResponse.json({ code }, { status: 200 });
   } catch (error) {
     return serviceErrorResponse(error, "Failed to purchase reservation");
   }

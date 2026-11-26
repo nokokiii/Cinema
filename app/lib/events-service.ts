@@ -4,6 +4,7 @@ import type { Db } from "mongodb";
 import { getDb } from "./mongodb";
 import { MAX_SEATS_PER_RESERVATION } from "./seats";
 import { getStripeConfig } from "./stripe";
+import { getLoyaltyProvider, pointsEarnedForCardAmount } from "./loyalty";
 import {
   CreateReservationResponse,
   EventDocument,
@@ -398,18 +399,27 @@ function ensureIndexes(db: Db): Promise<void> {
   return global._cinemaIndexesPromise;
 }
 
+export interface PurchaseResult {
+  code: string;
+  reservation: ReservationDocument;
+  // True only for the call that actually performed RESERVED -> PURCHASED, so callers (the
+  // Stripe webhook) can award loyalty points and send the confirmation email exactly once,
+  // even when the same webhook event is delivered more than once.
+  firstTransition: boolean;
+}
+
 /**
  * Purchases a reservation and confirms the ticket.
  * Idempotent: purchasing an already purchased reservation returns the same code.
  * Fails if reservation does not exist or has expired.
  */
-export async function purchaseReservation(idOrCode: string): Promise<{ code: string }> {
+export async function purchaseReservation(idOrCode: string): Promise<PurchaseResult> {
   const db = await getDb();
   const now = new Date();
   return db ? purchaseReservationInMongo(db, idOrCode, now) : purchaseReservationInMemory(idOrCode, now);
 }
 
-function purchaseReservationInMemory(idOrCode: string, now: Date): { code: string } {
+function purchaseReservationInMemory(idOrCode: string, now: Date): PurchaseResult {
   const reservation = getMemoryStore().reservations.find(
     (r) => r._id === idOrCode || r.code === idOrCode
   );
@@ -418,7 +428,7 @@ function purchaseReservationInMemory(idOrCode: string, now: Date): { code: strin
   }
 
   if (reservation.status === "PURCHASED") {
-    return { code: reservation.code };
+    return { code: reservation.code, reservation, firstTransition: false };
   }
 
   if (reservation.status === "EXPIRED" || new Date(reservation.expiresAt) <= now) {
@@ -428,7 +438,7 @@ function purchaseReservationInMemory(idOrCode: string, now: Date): { code: strin
 
   reservation.status = "PURCHASED";
   reservation.purchasedAt = now;
-  return { code: reservation.code };
+  return { code: reservation.code, reservation, firstTransition: true };
 }
 
 /**
@@ -439,7 +449,7 @@ async function purchaseReservationInMongo(
   db: Db,
   idOrCode: string,
   now: Date
-): Promise<{ code: string }> {
+): Promise<PurchaseResult> {
   const reservations = db.collection<ReservationDocument>("reservations");
   const match = { $or: [{ _id: idOrCode }, { code: idOrCode }] };
 
@@ -453,7 +463,7 @@ async function purchaseReservationInMongo(
     await db
       .collection<SeatLockDocument>("seatLocks")
       .updateMany({ reservationId: purchased._id }, { $set: { status: "PURCHASED" } });
-    return { code: purchased.code };
+    return { code: purchased.code, reservation: purchased, firstTransition: true };
   }
 
   const existing = await reservations.findOne(match);
@@ -462,7 +472,7 @@ async function purchaseReservationInMongo(
   }
 
   if (existing.status === "PURCHASED") {
-    return { code: existing.code };
+    return { code: existing.code, reservation: existing, firstTransition: false };
   }
 
   await reservations.updateOne(
@@ -502,6 +512,10 @@ export async function getReservationDetails(idOrCode: string): Promise<{
   const expiryDate = new Date(reservation.expiresAt);
   const isExpired = reservation.status !== "PURCHASED" && expiryDate <= now;
 
+  if (isExpired && reservation.status === "RESERVED") {
+    await finalizeExpiredReservation(db, reservation);
+  }
+
   const event = await getEventById(reservation.eventId);
 
   return {
@@ -512,19 +526,57 @@ export async function getReservationDetails(idOrCode: string): Promise<{
 }
 
 /**
+ * First caller to observe a reservation as expired (any read goes through here) marks it
+ * EXPIRED and, if it had spent loyalty points, refunds them exactly once — guarded by an
+ * atomic conditional update so a concurrent read can't double-refund.
+ */
+async function finalizeExpiredReservation(db: Db | null, reservation: ReservationDocument): Promise<void> {
+  const pointsToRefund = reservation.pointsUsed ?? 0;
+
+  if (db) {
+    const result = await db.collection<ReservationDocument>("reservations").updateOne(
+      { _id: reservation._id, status: "RESERVED", pointsRefunded: { $ne: true } },
+      { $set: { status: "EXPIRED", pointsRefunded: true } }
+    );
+    if (result.modifiedCount !== 1) return;
+  } else {
+    if (reservation.status !== "RESERVED" || reservation.pointsRefunded) return;
+    reservation.status = "EXPIRED";
+    reservation.pointsRefunded = true;
+  }
+
+  if (pointsToRefund > 0) {
+    await getLoyaltyProvider()
+      .adjustBalance(reservation.email, pointsToRefund)
+      .catch((error) => console.warn("[loyalty] Failed to refund points for expired reservation:", error));
+  }
+}
+
+/**
  * Derives the public `{ status, amount, expiresAt, code? }` shape from a reservation,
  * per the GET /api/reservations/:id contract. The ticket code is only exposed once paid.
  */
 export function toReservationStatusFields(
   reservation: ReservationDocument,
   isExpired: boolean
-): { status: "held" | "paid" | "expired"; amount: number; expiresAt: string; code?: string } {
+): {
+  status: "held" | "paid" | "expired";
+  amount: number;
+  expiresAt: string;
+  code?: string;
+  pointsUsed?: number;
+  pointsEarned?: number;
+} {
   const status = reservation.status === "PURCHASED" ? "paid" : isExpired ? "expired" : "held";
   return {
     status,
     amount: reservation.amount,
     expiresAt: new Date(reservation.expiresAt).toISOString(),
     ...(status === "paid" ? { code: reservation.code } : {}),
+    ...(reservation.pointsUsed !== undefined ? { pointsUsed: reservation.pointsUsed } : {}),
+    ...(status === "paid" && reservation.pointsEarned !== undefined
+      ? { pointsEarned: reservation.pointsEarned }
+      : {}),
   };
 }
 
@@ -546,4 +598,109 @@ export async function setReservationStripeSession(
 
   const reservation = getMemoryStore().reservations.find((r) => r._id === reservationId);
   if (reservation) reservation.stripeSessionId = stripeSessionId;
+}
+
+/**
+ * Commits the points a customer spends on a reservation, exactly once: the amount is
+ * deducted from their loyalty balance, and recorded on the reservation so a retried or
+ * concurrent checkout call for the same reservation never deducts twice (Etap III Karta B).
+ *
+ * The "not yet committed" check is made atomic per backend — otherwise two concurrent
+ * checkout calls (the same double-click / parallel-request pattern the Etap I/II criteria
+ * test for double-booking) would both read pointsUsed as unset and both deduct, exactly the
+ * class of bug those criteria exist to catch, just against the wallet instead of a seat.
+ */
+export async function commitReservationPoints(
+  reservation: ReservationDocument,
+  points: number
+): Promise<void> {
+  if (reservation.pointsUsed !== undefined) return;
+  if (points <= 0) {
+    reservation.pointsUsed = 0;
+    return;
+  }
+
+  const db = await getDb();
+
+  if (db) {
+    const won = await db
+      .collection<ReservationDocument>("reservations")
+      .findOneAndUpdate(
+        { _id: reservation._id, pointsUsed: { $exists: false } },
+        { $set: { pointsUsed: points } },
+        { returnDocument: "after" }
+      );
+
+    if (!won) {
+      // Lost the race: another call already committed points for this reservation.
+      const existing = await db
+        .collection<ReservationDocument>("reservations")
+        .findOne({ _id: reservation._id });
+      reservation.pointsUsed = existing?.pointsUsed ?? 0;
+      return;
+    }
+
+    reservation.pointsUsed = points;
+    try {
+      await getLoyaltyProvider().adjustBalance(reservation.email, -points);
+    } catch (error) {
+      // Roll back the mark so a retry can cleanly recommit instead of silently granting a
+      // discount that was never actually deducted from the customer's balance.
+      await db
+        .collection<ReservationDocument>("reservations")
+        .updateOne({ _id: reservation._id }, { $unset: { pointsUsed: "" } });
+      reservation.pointsUsed = undefined;
+      throw error;
+    }
+    return;
+  }
+
+  // In-memory: this check-then-mark runs as one synchronous turn (no await yet), so a
+  // concurrent call racing through the same `await getDb()` above can only ever observe it
+  // fully applied or not at all once its own turn resumes.
+  if (reservation.pointsUsed !== undefined) return;
+  reservation.pointsUsed = points;
+  try {
+    await getLoyaltyProvider().adjustBalance(reservation.email, -points);
+  } catch (error) {
+    reservation.pointsUsed = undefined;
+    throw error;
+  }
+}
+
+/**
+ * Awards loyalty points for the card-paid part of a purchase and records them on the
+ * reservation (Etap III Karta A). Call only once, on the webhook call that performed the
+ * RESERVED -> PURCHASED transition (see PurchaseResult.firstTransition) — a redelivered
+ * Stripe event for an already-purchased reservation must never call this again.
+ *
+ * A Voucherify outage here must not fail the webhook: the ticket is already sold by this
+ * point, and the "firstTransition" guard means this never runs again for this reservation,
+ * so throwing would permanently lose the points with no retry ever seeing them credited.
+ * We log and skip the credit instead, matching how the confirmation e-mail is handled.
+ */
+export async function awardPurchasePoints(reservation: ReservationDocument): Promise<number> {
+  const paidByCard = reservation.amount - (reservation.pointsUsed ?? 0);
+  const pointsEarned = pointsEarnedForCardAmount(paidByCard);
+
+  if (pointsEarned > 0) {
+    try {
+      await getLoyaltyProvider().adjustBalance(reservation.email, pointsEarned);
+    } catch (error) {
+      console.warn("[loyalty] Failed to award purchase points, skipping credit:", error);
+      return 0;
+    }
+  }
+
+  const db = await getDb();
+  if (db) {
+    await db
+      .collection<ReservationDocument>("reservations")
+      .updateOne({ _id: reservation._id }, { $set: { pointsEarned } });
+  } else {
+    const stored = getMemoryStore().reservations.find((r) => r._id === reservation._id);
+    if (stored) stored.pointsEarned = pointsEarned;
+  }
+
+  return pointsEarned;
 }

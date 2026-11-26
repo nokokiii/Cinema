@@ -31,6 +31,18 @@ export interface ReservationDocument {
   // Stripe Checkout Session currently open for this reservation, if any (reused to avoid
   // creating a second payable session for the same booking).
   stripeSessionId?: string;
+  // Loyalty points (Etap III). pointsUsed is committed once, at the first checkout call;
+  // pointsEarned is set once the purchase webhook actually awards them.
+  pointsUsed?: number;
+  pointsEarned?: number;
+  // Guards a one-time loyalty-points refund if a reservation with pointsUsed expires unpaid.
+  pointsRefunded?: boolean;
+}
+
+// One row per customer email in the fallback (non-Voucherify) loyalty store.
+export interface LoyaltyAccountDocument {
+  _id: string; // email
+  balance: number;
 }
 
 // One document per (event, seat); its unique _id makes seat acquisition atomic in MongoDB
@@ -71,10 +83,12 @@ export interface PurchaseResponse {
   code: string;
 }
 
-// Public shape of GET /api/reservations/:id per the Etap II contract.
+// Public shape of GET /api/reservations/:id per the Etap II/III contract.
 export interface ReservationStatusFields {
   status: "held" | "paid" | "expired";
   amount: number;
   expiresAt: string;
   code?: string;
+  pointsUsed?: number;
+  pointsEarned?: number;
 }

@@ -84,5 +84,27 @@ Copy that endpoint's `whsec_...` into Vercel `STRIPE_WEBHOOK_SECRET`, then redep
 
 - `POST /api/reservations/:id/checkout`
 - `POST /api/webhooks/stripe`
-- `GET /api/reservations/:id` — `{ status, amount, expiresAt, code? }`
+- `GET /api/reservations/:id` — `{ status, amount, expiresAt, code?, pointsUsed?, pointsEarned? }`
+
+## 7) Loyalty points (Etap III)
+
+```env
+VOUCHERIFY_APPLICATION_ID=""
+VOUCHERIFY_SECRET_KEY=""
+VOUCHERIFY_CAMPAIGN_ID=""
+RESEND_API_KEY=""
+```
+
+- Leave the three `VOUCHERIFY_*` vars unset (no sandbox account exists yet) and the app
+  falls back to an in-memory/Mongo loyalty store with the same documented behaviour (1000
+  welcome points, half-price redemption cap, 10 pts/PLN earned). Set all three once a real
+  Voucherify sandbox + loyalty campaign exists — no other code changes needed. See
+  `app/lib/loyalty.ts` for the assumptions baked into the real client (worth double-checking
+  against the actual account once it exists).
+- `RESEND_API_KEY` is a real, working sending-only key for this project. Without a verified
+  domain, Resend only delivers from `onboarding@resend.dev` to the account owner's address
+  and to published test addresses (`delivered@resend.dev`, `bounced@resend.dev`, `+label`
+  works for distinct test customers). A failed send never blocks a purchase.
+- `GET /api/loyalty?email=...` → `{ email, points }`.
+- `POST /api/reservations/:id/checkout` accepts an optional `{ points }` body.
 
